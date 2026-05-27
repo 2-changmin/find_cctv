@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SafeLens</string>
+    <string name="title_activity_main">SafeLens</string>
+    <string name="package_name">com.safelens.app</string>
+    <string name="custom_url_scheme">com.safelens.app</string>
+</resources>
