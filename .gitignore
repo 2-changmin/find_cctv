@@ -1,0 +1,32 @@
+node_modules/
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local editor and OS files
+.DS_Store
+.vscode/
+.idea/
+
+# Environment files
+.env
+.env.*
+
+# Capacitor / native build outputs
+android/app/build/
+android/build/
+android/.gradle/
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+ios/App/DerivedData/
+ios/App/build/
+ios/App/App/public/
+
+# Xcode user state
+*.xcuserstate
+xcuserdata/
