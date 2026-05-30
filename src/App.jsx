@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { detectSuspiciousSpots } from "./lib/detector";
-import { fileToImage, setTorch, startRearCamera } from "./lib/media";
+import { fileToImage, setTorch, startRearCamera, openAppSettings } from "./lib/media";
 import { buildReportText, downloadTextFile, downloadCanvasImage, buildReportZip, downloadZipFile } from "./lib/report";
 import { reverseGeocode } from "./lib/geocode";
 
@@ -40,6 +40,7 @@ export default function App() {
   const streamRef = useRef(null);
   const videoTrackRef = useRef(null);
   const scanTickRef = useRef(null);
+  const scanHistoryRef = useRef([]);
 
   const [tab, setTab] = useState(TABS.home);
   const [boxes, setBoxes] = useState([]);
@@ -50,6 +51,7 @@ export default function App() {
   const [hasImage, setHasImage] = useState(false);
   const [sensitivity, setSensitivity] = useState("normal");
   const [status, setStatus] = useState("사진을 선택하거나 촬영한 뒤 분석을 실행하세요.");
+  const [showSettingsButton, setShowSettingsButton] = useState(false);
   const [reportText, setReportText] = useState("");
   const [form, setForm] = useState({ reportTime: "", reportPlace: "", reportDesc: "" });
 
@@ -162,9 +164,11 @@ export default function App() {
       setFlashEnabled(Boolean(capabilities.torch));
       setCameraOn(true);
       setLiveBoxes([]);
+      setShowSettingsButton(false);
       setStatus("실시간 렌즈 반사 확인을 시작했습니다.");
     } catch {
-      setStatus("카메라 권한이 필요합니다. iPhone 설정 > 앱 > SafeLens에서 카메라를 허용하세요.");
+      setShowSettingsButton(true);
+      setStatus("카메라 권한을 허용해야 실시간 스캔을 사용할 수 있습니다. 설정으로 이동하세요.");
     }
   };
 
@@ -182,6 +186,15 @@ export default function App() {
     setCameraOn(false);
     setFlashEnabled(false);
     setTorchOn(false);
+  };
+
+  const openSettings = async () => {
+    const opened = await openAppSettings();
+    if (opened) {
+      setStatus("설정 화면을 열었습니다. 거기에서 권한을 허용해주세요.");
+    } else {
+      setStatus("설정 화면을 열 수 없습니다. 앱 설정으로 이동하여 권한을 허용해주세요.");
+    }
   };
 
   const toggleFlash = async () => {
@@ -210,6 +223,7 @@ export default function App() {
       async (pos) => {
         const lat = pos.coords.latitude.toFixed(6);
         const lng = pos.coords.longitude.toFixed(6);
+        setShowSettingsButton(false);
         setStatus("주소 변환 중...");
         try {
           const address = await reverseGeocode(lat, lng);
@@ -220,9 +234,75 @@ export default function App() {
           setStatus("좌표를 신고 문안에 입력했습니다. (주소 변환 실패)");
         }
       },
-      () => setStatus("위치 권한을 허용하면 현재 좌표를 자동 입력할 수 있습니다."),
+      (err) => {
+        setShowSettingsButton(true);
+        if (err?.code === 1) {
+          setStatus("위치 권한을 거부했습니다. 설정에서 위치 사용을 허용하세요.");
+        } else {
+          setStatus("위치 권한을 허용하면 현재 좌표를 자동 입력할 수 있습니다.");
+        }
+      },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
     );
+  };
+
+  const mergeScanFrames = (nextBoxes) => {
+    const history = scanHistoryRef.current;
+    history.push(nextBoxes);
+    if (history.length > 3) history.shift();
+    if (history.length < 2) return nextBoxes;
+
+    const clusters = [];
+    history.flat().forEach((box) => {
+      const cx = box.x + box.w / 2;
+      const cy = box.y + box.h / 2;
+      const match = clusters.find((cluster) => {
+        const dist = Math.hypot(cluster.cx - cx, cluster.cy - cy);
+        return (
+          dist < Math.max(30, Math.min(cluster.w, cluster.h) * 0.35) &&
+          Math.abs(cluster.w - box.w) < Math.max(20, cluster.w * 0.4) &&
+          Math.abs(cluster.h - box.h) < Math.max(20, cluster.h * 0.4)
+        );
+      });
+
+      if (match) {
+        match.count += 1;
+        match.sumX += box.x;
+        match.sumY += box.y;
+        match.sumW += box.w;
+        match.sumH += box.h;
+        if ((box.confidence ?? 0) > (match.bestConfidence ?? 0)) {
+          match.best = box;
+          match.bestConfidence = box.confidence ?? 0;
+        }
+      } else {
+        clusters.push({
+          cx,
+          cy,
+          count: 1,
+          sumX: box.x,
+          sumY: box.y,
+          sumW: box.w,
+          sumH: box.h,
+          w: box.w,
+          h: box.h,
+          best: box,
+          bestConfidence: box.confidence ?? 0
+        });
+      }
+    });
+
+    return clusters
+      .filter((cluster) => cluster.count >= 2)
+      .map((cluster) => ({
+        x: Math.round(cluster.sumX / cluster.count),
+        y: Math.round(cluster.sumY / cluster.count),
+        w: Math.round(cluster.sumW / cluster.count),
+        h: Math.round(cluster.sumH / cluster.count),
+        risk: cluster.best.risk,
+        confidence: Math.round(cluster.best.confidence),
+        type: cluster.best.type
+      }));
   };
 
   useEffect(() => {
@@ -245,10 +325,11 @@ export default function App() {
         maxResults: 5,
         sensitivity
       });
-      setLiveBoxes(nextLiveBoxes);
+      const stableBoxes = mergeScanFrames(nextLiveBoxes);
+      setLiveBoxes(stableBoxes);
 
       octx.lineWidth = 3;
-      nextLiveBoxes.forEach((b, idx) => {
+      stableBoxes.forEach((b, idx) => {
         octx.strokeStyle = markerColor(b.risk);
         octx.strokeRect(b.x, b.y, b.w, b.h);
         octx.fillStyle = markerColor(b.risk);
@@ -367,6 +448,11 @@ export default function App() {
               <canvas ref={previewCanvasRef} />
             </div>
             <p className="status-text">{status}</p>
+            {showSettingsButton && (
+              <button className="btn btn-link" onClick={openSettings}>
+                설정 열기
+              </button>
+            )}
             <div className="result-list">
               {boxes.length === 0 && <div className="empty-state">분석 결과가 여기에 표시됩니다.</div>}
               {boxes.map((b, i) => (
@@ -410,8 +496,17 @@ export default function App() {
               <canvas ref={overlayRef} id="overlay" />
             </div>
             <p className="status-text">
-              {cameraOn ? `현재 후보 ${liveBoxes.length}개 · 색상은 위험도 기준입니다.` : "시작을 누르면 후면 카메라로 확인합니다."}
+              {showSettingsButton
+                ? status
+                : cameraOn
+                ? `현재 후보 ${liveBoxes.length}개 · 색상은 위험도 기준입니다.`
+                : "시작을 누르면 후면 카메라로 확인합니다."}
             </p>
+            {showSettingsButton && (
+              <button className="btn btn-link" onClick={openSettings}>
+                설정 열기
+              </button>
+            )}
           </section>
         )}
 
@@ -429,6 +524,12 @@ export default function App() {
                 현재 위치
               </button>
             </div>
+            {showSettingsButton && (
+              <button className="btn btn-link" onClick={openSettings}>
+                설정 열기
+              </button>
+            )}
+            <p className="status-text">{status}</p>
             <input
               className="form-control"
               type="datetime-local"

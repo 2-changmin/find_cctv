@@ -1,4 +1,5 @@
 import { Capacitor } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 
 export function isNativeApp() {
@@ -108,4 +109,22 @@ export async function setTorch(track, enabled) {
     throw new Error("이 기기는 플래시 제어를 지원하지 않습니다.");
   }
   await track.applyConstraints({ advanced: [{ torch: enabled }] });
+}
+
+export async function openAppSettings() {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await CapacitorApp.openUrl({ url: "app-settings:" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  try {
+    window.open("app-settings:", "_blank");
+    return true;
+  } catch {
+    return false;
+  }
 }
