@@ -258,7 +258,7 @@ export default function App() {
   useEffect(() => () => stopCamera(), []);
 
   const buildReport = () => {
-    setReportText(buildReportText(form));
+    setReportText(buildReportText(form, boxes));
   };
 
   const downloadReport = () => {
