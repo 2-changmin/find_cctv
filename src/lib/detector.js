@@ -17,6 +17,7 @@ function colorSaturation(r, g, b) {
 
 export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
   const maxResults = options.maxResults ?? 8;
+  const minConfidence = options.minConfidence ?? 0;
   const data = ctx2d.getImageData(0, 0, w, h);
   const px = data.data;
   const bright = new Uint8Array(w * h);
@@ -198,5 +199,9 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
     }
   }
 
-  return candidates.sort((a, b) => b.score - a.score).slice(0, maxResults);
+  return candidates
+    .filter((item) => item.confidence >= minConfidence)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxResults);
 }
+

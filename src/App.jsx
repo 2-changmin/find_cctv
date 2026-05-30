@@ -50,9 +50,11 @@ export default function App() {
   const [torchOn, setTorchOn] = useState(false);
   const [hasImage, setHasImage] = useState(false);
   const [sensitivity, setSensitivity] = useState("normal");
+  const [minConfidence, setMinConfidence] = useState(40);
   const [status, setStatus] = useState("사진을 선택하거나 촬영한 뒤 분석을 실행하세요.");
   const [showSettingsButton, setShowSettingsButton] = useState(false);
   const [reportText, setReportText] = useState("");
+  const [history, setHistory] = useState([]);
   const [form, setForm] = useState({ reportTime: "", reportPlace: "", reportDesc: "" });
 
   const summary = useMemo(() => formatRiskSummary(boxes), [boxes]);
@@ -164,6 +166,7 @@ export default function App() {
       setFlashEnabled(Boolean(capabilities.torch));
       setCameraOn(true);
       setLiveBoxes([]);
+      scanHistoryRef.current = [];
       setShowSettingsButton(false);
       setStatus("실시간 렌즈 반사 확인을 시작했습니다.");
     } catch {
@@ -175,6 +178,7 @@ export default function App() {
   const stopCamera = () => {
     if (scanTickRef.current) clearInterval(scanTickRef.current);
     scanTickRef.current = null;
+    scanHistoryRef.current = [];
     if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -246,54 +250,77 @@ export default function App() {
     );
   };
 
+  const getActiveReportData = () => {
+    const canvases = [];
+    if (previewCanvasRef.current) canvases.push({ canvas: previewCanvasRef.current, label: "분석 결과 이미지" });
+    if (overlayRef.current) canvases.push({ canvas: overlayRef.current, label: "실시간 스캔 캡처" });
+
+    if (boxes.length) {
+      return { boxes, canvases, source: "사진 분석" };
+    }
+    if (liveBoxes.length) {
+      return { boxes: liveBoxes, canvases, source: "실시간 스캔" };
+    }
+    return { boxes: [], canvases, source: "분석 없음" };
+  };
+
   const mergeScanFrames = (nextBoxes) => {
     const history = scanHistoryRef.current;
     history.push(nextBoxes);
-    if (history.length > 3) history.shift();
+    if (history.length > 6) history.shift();
     if (history.length < 2) return nextBoxes;
 
+    const frames = history.slice(-5);
     const clusters = [];
-    history.flat().forEach((box) => {
-      const cx = box.x + box.w / 2;
-      const cy = box.y + box.h / 2;
-      const match = clusters.find((cluster) => {
-        const dist = Math.hypot(cluster.cx - cx, cluster.cy - cy);
-        return (
-          dist < Math.max(30, Math.min(cluster.w, cluster.h) * 0.35) &&
-          Math.abs(cluster.w - box.w) < Math.max(20, cluster.w * 0.4) &&
-          Math.abs(cluster.h - box.h) < Math.max(20, cluster.h * 0.4)
-        );
-      });
 
-      if (match) {
-        match.count += 1;
-        match.sumX += box.x;
-        match.sumY += box.y;
-        match.sumW += box.w;
-        match.sumH += box.h;
-        if ((box.confidence ?? 0) > (match.bestConfidence ?? 0)) {
-          match.best = box;
-          match.bestConfidence = box.confidence ?? 0;
-        }
-      } else {
-        clusters.push({
-          cx,
-          cy,
-          count: 1,
-          sumX: box.x,
-          sumY: box.y,
-          sumW: box.w,
-          sumH: box.h,
-          w: box.w,
-          h: box.h,
-          best: box,
-          bestConfidence: box.confidence ?? 0
+    frames.forEach((frame, frameIndex) => {
+      frame.forEach((box) => {
+        const cx = box.x + box.w / 2;
+        const cy = box.y + box.h / 2;
+        const match = clusters.find((cluster) => {
+          const dist = Math.hypot(cluster.cx - cx, cluster.cy - cy);
+          return (
+            dist < Math.max(30, Math.min(cluster.w, box.w) * 0.35) &&
+            Math.abs(cluster.w - box.w) < Math.max(20, cluster.w * 0.4) &&
+            Math.abs(cluster.h - box.h) < Math.max(20, cluster.h * 0.4)
+          );
         });
-      }
+
+        if (match) {
+          match.count += 1;
+          match.sumX += box.x;
+          match.sumY += box.y;
+          match.sumW += box.w;
+          match.sumH += box.h;
+          match.framesSeen.add(frameIndex);
+          match.sumConfidence += box.confidence ?? 0;
+          if ((box.confidence ?? 0) > (match.bestConfidence ?? 0)) {
+            match.best = box;
+            match.bestConfidence = box.confidence ?? 0;
+          }
+        } else {
+          clusters.push({
+            cx,
+            cy,
+            count: 1,
+            sumX: box.x,
+            sumY: box.y,
+            sumW: box.w,
+            sumH: box.h,
+            w: box.w,
+            h: box.h,
+            best: box,
+            bestConfidence: box.confidence ?? 0,
+            sumConfidence: box.confidence ?? 0,
+            framesSeen: new Set([frameIndex])
+          });
+        }
+      });
     });
 
+    const minFrameCount = Math.max(2, Math.ceil(frames.length * 0.4));
     return clusters
-      .filter((cluster) => cluster.count >= 2)
+      .filter((cluster) => cluster.framesSeen.size >= minFrameCount)
       .map((cluster) => ({
         x: Math.round(cluster.sumX / cluster.count),
         y: Math.round(cluster.sumY / cluster.count),
@@ -323,7 +350,8 @@ export default function App() {
       tctx.drawImage(video, 0, 0, temp.width, temp.height);
       const nextLiveBoxes = detectSuspiciousSpots(tctx, temp.width, temp.height, {
         maxResults: 5,
-        sensitivity
+        sensitivity,
+        minConfidence
       });
       const stableBoxes = mergeScanFrames(nextLiveBoxes);
       setLiveBoxes(stableBoxes);
@@ -346,20 +374,20 @@ export default function App() {
   useEffect(() => () => stopCamera(), []);
 
   const buildReport = () => {
-    setReportText(buildReportText(form, boxes));
+    const { boxes: reportBoxes, source } = getActiveReportData();
+    setReportText(buildReportText(form, reportBoxes, { sensitivity, minConfidence, source }));
   };
 
   const downloadReport = async () => {
+    const { boxes: reportBoxes, canvases, source } = getActiveReportData();
     if (!reportText.trim()) {
-      setStatus("먼저 신고 문안을 생성하세요.");
-      return;
+      setReportText(buildReportText(form, reportBoxes, { sensitivity, minConfidence, source }));
     }
-    const canvas = previewCanvasRef.current || overlayRef.current || null;
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
     const filename = `safelens_report-${timestamp}.zip`;
-    const zipBlob = await buildReportZip(form, boxes, canvas);
+    const zipBlob = await buildReportZip(form, reportBoxes, canvases, { sensitivity, minConfidence, source });
     downloadZipFile(filename, zipBlob);
-    setStatus("신고 리포트와 캡처 이미지를 ZIP으로 저장했습니다.");
+    setStatus("현재 분석 이미지와 후보 정보를 포함한 신고 리포트를 ZIP으로 저장했습니다.");
   };
 
   return (
@@ -432,6 +460,20 @@ export default function App() {
                 <option value="normal">보통</option>
                 <option value="high">높음 (민감)</option>
               </select>
+            </div>
+            <div className="form-group">
+              <label htmlFor="confidenceInput" className="form-label">최소 탐지 신뢰도</label>
+              <input
+                id="confidenceInput"
+                type="number"
+                min="0"
+                max="100"
+                step="5"
+                className="form-control"
+                value={minConfidence}
+                onChange={(event) => setMinConfidence(Number(event.target.value))}
+              />
+              <div className="form-text">이 값보다 낮은 후보는 자동으로 제외합니다.</div>
             </div>
             <div className="actions d-flex gap-2">
               <button className="btn btn-primary" onClick={analyzeImage} disabled={!hasImage}>
