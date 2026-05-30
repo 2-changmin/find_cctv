@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { detectSuspiciousSpots } from "./lib/detector";
 import { fileToImage, setTorch, startRearCamera } from "./lib/media";
 import { buildReportText, downloadTextFile, downloadCanvasImage } from "./lib/report";
+import { reverseGeocode } from "./lib/geocode";
 
 const TABS = {
   home: "home",
@@ -205,13 +206,19 @@ export default function App() {
       setStatus("이 기기에서 위치 정보를 지원하지 않습니다.");
       return;
     }
-
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         const lat = pos.coords.latitude.toFixed(6);
         const lng = pos.coords.longitude.toFixed(6);
-        setForm((prev) => ({ ...prev, reportPlace: `현재 위치 (${lat}, ${lng})` }));
-        setStatus("현재 위치 좌표를 신고 문안에 입력했습니다.");
+        setStatus("주소 변환 중...");
+        try {
+          const address = await reverseGeocode(lat, lng);
+          setForm((prev) => ({ ...prev, reportPlace: `${address} (${lat}, ${lng})` }));
+          setStatus("현재 위치 주소를 신고 문안에 입력했습니다.");
+        } catch (e) {
+          setForm((prev) => ({ ...prev, reportPlace: `현재 위치 (${lat}, ${lng})` }));
+          setStatus("좌표를 신고 문안에 입력했습니다. (주소 변환 실패)");
+        }
       },
       () => setStatus("위치 권한을 허용하면 현재 좌표를 자동 입력할 수 있습니다."),
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
