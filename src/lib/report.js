@@ -80,3 +80,43 @@ export function downloadHtmlFile(filename, content) {
   URL.revokeObjectURL(link.href);
 }
 
+export async function buildReportZip(form, boxes = [], canvas = null) {
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+  const htmlText = buildReportText(form, boxes).replace(/\n/g, "<br />");
+  const reportBody = [
+    "<!doctype html>",
+    "<html lang=\"ko\">",
+    "<head>",
+    "  <meta charset=\"utf-8\" />",
+    "  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />",
+    "  <title>SafeLens 신고 리포트</title>",
+    "  <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans KR',Arial;padding:16px;color:#111} img{max-width:100%;height:auto;border:1px solid #ccc;} </style>",
+    "</head>",
+    "<body>",
+    "  <h1>SafeLens 신고 리포트</h1>",
+    `  <div>${htmlText}</div>`,
+    canvas ? `  <div style=\"margin-top:12px;\"><strong>첨부 이미지:</strong><br/><img src=\"capture.png\" alt=\"Capture\"/></div>` : "",
+    "</body>",
+    "</html>"
+  ].filter(Boolean).join("\n");
+  zip.file("report.html", reportBody);
+
+  if (canvas) {
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.95));
+    if (blob) {
+      zip.file("capture.png", blob);
+    }
+  }
+
+  return zip.generateAsync({ type: "blob" });
+}
+
+export function downloadZipFile(filename, blob) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
