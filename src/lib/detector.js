@@ -26,8 +26,16 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
   const lum = new Float32Array(w * h);
   const sat = new Float32Array(w * h);
 
-  const BRIGHT_TH = 244;
-  const DARK_TH = 38;
+  const sensitivity = options.sensitivity || "normal";
+  const thresholdConfig = {
+    low: { bright: 248, dark: 34, sat: 0.30, ringContrast: 0.85, minArea: 35 },
+    normal: { bright: 244, dark: 38, sat: 0.28, ringContrast: 0.92, minArea: 28 },
+    high: { bright: 240, dark: 42, sat: 0.26, ringContrast: 0.98, minArea: 18 }
+  }[sensitivity];
+
+  const BRIGHT_TH = thresholdConfig.bright;
+  const DARK_TH = thresholdConfig.dark;
+  const SAT_TH = thresholdConfig.sat;
 
   for (let i = 0; i < w * h; i += 1) {
     const r = px[i * 4];
@@ -36,7 +44,7 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
     const v = r * 0.299 + g * 0.587 + b * 0.114;
     lum[i] = v;
     sat[i] = colorSaturation(r, g, b);
-    if (v >= BRIGHT_TH && sat[i] < 0.28) bright[i] = 1;
+    if (v >= BRIGHT_TH && sat[i] < SAT_TH) bright[i] = 1;
     if (v <= DARK_TH) dark[i] = 1;
   }
 

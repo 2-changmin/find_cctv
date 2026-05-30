@@ -47,6 +47,7 @@ export default function App() {
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [hasImage, setHasImage] = useState(false);
+  const [sensitivity, setSensitivity] = useState("normal");
   const [status, setStatus] = useState("사진을 선택하거나 촬영한 뒤 분석을 실행하세요.");
   const [reportText, setReportText] = useState("");
   const [form, setForm] = useState({ reportTime: "", reportPlace: "", reportDesc: "" });
@@ -117,7 +118,10 @@ export default function App() {
     const ctx = drawBaseImage();
     const canvas = previewCanvasRef.current;
     if (!ctx || !canvas) return;
-    const nextBoxes = detectSuspiciousSpots(ctx, canvas.width, canvas.height, { maxResults: 6 });
+    const nextBoxes = detectSuspiciousSpots(ctx, canvas.width, canvas.height, {
+      maxResults: 6,
+      sensitivity
+    });
     drawBoxes(nextBoxes);
     setBoxes(nextBoxes);
     setStatus(nextBoxes.length ? `상위 의심 후보 ${nextBoxes.length}개를 표시했습니다.` : "뚜렷한 의심 후보가 식별되지 않았습니다.");
@@ -230,7 +234,10 @@ export default function App() {
       temp.height = overlay.height;
       const tctx = temp.getContext("2d");
       tctx.drawImage(video, 0, 0, temp.width, temp.height);
-      const nextLiveBoxes = detectSuspiciousSpots(tctx, temp.width, temp.height, { maxResults: 5 });
+      const nextLiveBoxes = detectSuspiciousSpots(tctx, temp.width, temp.height, {
+        maxResults: 5,
+        sensitivity
+      });
       setLiveBoxes(nextLiveBoxes);
 
       octx.lineWidth = 3;
@@ -320,6 +327,19 @@ export default function App() {
             </div>
             <input ref={libraryInputRef} className="visually-hidden" type="file" accept="image/*" onChange={onFileChange} />
             <input ref={cameraInputRef} className="visually-hidden" type="file" accept="image/*" capture="environment" onChange={onFileChange} />
+            <div className="form-group">
+              <label htmlFor="sensitivitySelect" className="form-label">탐지 민감도</label>
+              <select
+                id="sensitivitySelect"
+                className="form-select"
+                value={sensitivity}
+                onChange={(event) => setSensitivity(event.target.value)}
+              >
+                <option value="low">낮음 (적은 오탐)</option>
+                <option value="normal">보통</option>
+                <option value="high">높음 (민감)</option>
+              </select>
+            </div>
             <div className="actions d-flex gap-2">
               <button className="btn btn-primary" onClick={analyzeImage} disabled={!hasImage}>
                 분석
