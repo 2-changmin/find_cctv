@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { detectSuspiciousSpots } from "./lib/detector";
 import { fileToImage, setTorch, startRearCamera } from "./lib/media";
-import { buildReportText, downloadTextFile, downloadCanvasImage } from "./lib/report";
+import { buildReportText, downloadTextFile, downloadCanvasImage, buildReportHtml, downloadHtmlFile } from "./lib/report";
 import { reverseGeocode } from "./lib/geocode";
 
 const TABS = {
@@ -273,6 +273,17 @@ export default function App() {
       setStatus("먼저 신고 문안을 생성하세요.");
       return;
     }
+    // Prefer embedding the analysis capture into an HTML report when a canvas is available
+    const canvas = previewCanvasRef.current || overlayRef.current || null;
+    if (canvas) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
+      const filename = `safelens_report-${timestamp}.html`;
+      const html = buildReportHtml(form, boxes, canvas);
+      downloadHtmlFile(filename, html);
+      setStatus("이미지 포함 신고 리포트를 저장했습니다.");
+      return;
+    }
+
     downloadTextFile("safelens_report.txt", reportText);
   };
 

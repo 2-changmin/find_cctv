@@ -42,3 +42,41 @@ export function downloadCanvasImage(filename, canvas) {
   }, "image/png", 0.95);
 }
 
+export function buildReportHtml(form, boxes = [], canvas = null) {
+  const text = buildReportText(form, boxes).replace(/\n/g, "<br />");
+  let imgTag = "";
+  try {
+    if (canvas) {
+      const dataUrl = canvas.toDataURL("image/png", 0.95);
+      imgTag = `<div style="margin-top:12px;"><strong>첨부 이미지:</strong><br/><img src=\"${dataUrl}\" style=\"max-width:100%;height:auto;border:1px solid #ccc;\"/></div>`;
+    }
+  } catch (e) {
+    // ignore dataURL errors (CORS) and proceed without image
+    imgTag = "";
+  }
+
+  return `<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SafeLens 신고 리포트</title>
+  <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans KR',Arial;padding:16px;color:#111} pre{white-space:pre-wrap}</style>
+</head>
+<body>
+  <h1>SafeLens 신고 리포트</h1>
+  <div>${text}</div>
+  ${imgTag}
+</body>
+</html>`;
+}
+
+export function downloadHtmlFile(filename, content) {
+  const blob = new Blob([content], { type: "text/html;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
