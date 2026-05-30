@@ -20,3 +20,13 @@ export function downloadTextFile(filename, content) {
   URL.revokeObjectURL(link.href);
 }
 
+export function downloadCanvasImage(filename, canvas) {
+  canvas.toBlob((blob) => {
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }, "image/png", 0.95);
+}
+

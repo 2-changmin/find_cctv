@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { detectSuspiciousSpots } from "./lib/detector";
 import { fileToImage, setTorch, startRearCamera } from "./lib/media";
-import { buildReportText, downloadTextFile } from "./lib/report";
+import { buildReportText, downloadTextFile, downloadCanvasImage } from "./lib/report";
 
 const TABS = {
   home: "home",
@@ -127,6 +127,24 @@ export default function App() {
     drawBaseImage();
     setBoxes([]);
     setStatus(hasImage ? "분석 표시를 초기화했습니다." : "사진을 선택하거나 촬영한 뒤 분석을 실행하세요.");
+  };
+
+  const saveAnalysisImage = () => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas) return;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
+    const filename = `safelens-analysis-${timestamp}.png`;
+    downloadCanvasImage(filename, canvas);
+    setStatus("분석 결과 이미지를 저장했습니다.");
+  };
+
+  const saveLiveCapture = () => {
+    const canvas = overlayRef.current;
+    if (!canvas) return;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
+    const filename = `safelens-scan-${timestamp}.png`;
+    downloadCanvasImage(filename, canvas);
+    setStatus("실시간 스캔 캡처를 저장했습니다.");
   };
 
   const startCamera = async () => {
@@ -309,6 +327,9 @@ export default function App() {
               <button className="btn btn-outline-secondary" onClick={resetImage}>
                 초기화
               </button>
+              <button className="btn btn-success" onClick={saveAnalysisImage} disabled={boxes.length === 0}>
+                💾 저장
+              </button>
             </div>
             <div className="canvas-wrap">
               <canvas ref={previewCanvasRef} />
@@ -347,6 +368,9 @@ export default function App() {
               </button>
               <button className="btn btn-warning" onClick={toggleFlash} disabled={!cameraOn || !flashEnabled}>
                 {torchOn ? "끄기" : "플래시"}
+              </button>
+              <button className="btn btn-success" onClick={saveLiveCapture} disabled={!cameraOn || liveBoxes.length === 0}>
+                💾 캡처
               </button>
             </div>
             <div className="camera-wrap">
