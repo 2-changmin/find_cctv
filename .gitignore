@@ -1,4 +1,14 @@
-﻿node_modules
+node_modules
 dist
 .vscode
 .DS_Store
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+android/local.properties
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
