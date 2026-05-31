@@ -35,3 +35,20 @@ flutter run
 - 이 앱은 몰래카메라 존재를 확정하지 않는 보조 도구입니다.
 - 현재 분석은 머신러닝 모델이 아니라 밝기/대비 기반 로컬 휴리스틱입니다.
 - 카메라/플래시 동작은 실제 기기와 에뮬레이터 환경에 따라 제한될 수 있습니다.
+
+## Git line-ending policy (GeneratedPluginRegistrant)
+
+`android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java` is an auto-generated Flutter file.
+On Windows, it can appear as modified only because of line-ending conversion (CRLF vs LF), even when code content is unchanged.
+
+This repository now includes `.gitattributes` to normalize text files to LF in Git.
+
+Recommended one-time setup:
+
+```bash
+git config core.autocrlf true
+git add --renormalize .
+git status
+```
+
+If `git status` is clean after renormalization, no real source change exists.
