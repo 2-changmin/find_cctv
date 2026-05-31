@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { detectSuspiciousSpots } from "./lib/detector";
-import { fileToImage, setTorch, startRearCamera, openAppSettings } from "./lib/media";
+import { fileToImage, loadImage, setTorch, startRearCamera, openAppSettings } from "./lib/media";
 import { buildReportText, downloadTextFile, downloadCanvasImage, buildReportZip, downloadZipFile } from "./lib/report";
 import { reverseGeocode } from "./lib/geocode";
 
@@ -17,6 +17,8 @@ const TAB_ITEMS = [
   { id: TABS.scan, label: "스캔", icon: "◉" },
   { id: TABS.report, label: "신고", icon: "!" }
 ];
+
+const HISTORY_KEY = "safelens-analysis-history";
 
 function getCurrentDateTimeValue() {
   const now = new Date();
@@ -56,6 +58,61 @@ export default function App() {
   const [reportText, setReportText] = useState("");
   const [history, setHistory] = useState([]);
   const [form, setForm] = useState({ reportTime: "", reportPlace: "", reportDesc: "" });
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      if (raw) {
+        setHistory(JSON.parse(raw));
+      }
+    } catch {
+      // ignore local storage errors
+    }
+  }, []);
+
+  const persistHistory = (items) => {
+    setHistory(items);
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
+    } catch {
+      // ignore local storage errors
+    }
+  };
+
+  const addHistoryEntry = (entry) => {
+    const next = [entry, ...history].slice(0, 10);
+    persistHistory(next);
+  };
+
+  const loadHistoryItem = async (item) => {
+    if (!item?.imageUrl) {
+      setStatus("저장된 분석 결과를 불러올 수 없습니다.");
+      return;
+    }
+
+    try {
+      let img;
+      if (typeof item.imageUrl === "string" && item.imageUrl.startsWith("data:")) {
+        img = await loadImage(item.imageUrl);
+      } else {
+        const response = await fetch(item.imageUrl);
+        const blob = await response.blob();
+        img = await fileToImage(new File([blob], "history.png", { type: blob.type }));
+      }
+
+      loadedImgRef.current = img;
+      setBoxes(item.boxes || []);
+      setHasImage(true);
+      setTab(TABS.analyze);
+      setStatus(`저장된 ${item.source} 결과를 불러왔습니다.`);
+      requestAnimationFrame(() => {
+        const ctx = drawBaseImage();
+        if (ctx) drawBoxes(item.boxes || []);
+      });
+    } catch {
+      setStatus("저장된 분석 결과를 불러오는 중 오류가 발생했습니다.");
+    }
+  };
 
   const summary = useMemo(() => formatRiskSummary(boxes), [boxes]);
   const liveSummary = useMemo(() => formatRiskSummary(liveBoxes), [liveBoxes]);
@@ -119,17 +176,31 @@ export default function App() {
     }
   };
 
-  const analyzeImage = () => {
+  const analyzeImage = async () => {
     const ctx = drawBaseImage();
     const canvas = previewCanvasRef.current;
     if (!ctx || !canvas) return;
     const nextBoxes = detectSuspiciousSpots(ctx, canvas.width, canvas.height, {
       maxResults: 6,
-      sensitivity
+      sensitivity,
+      minConfidence
     });
     drawBoxes(nextBoxes);
     setBoxes(nextBoxes);
     setStatus(nextBoxes.length ? `상위 의심 후보 ${nextBoxes.length}개를 표시했습니다.` : "뚜렷한 의심 후보가 식별되지 않았습니다.");
+
+    try {
+      const entry = {
+        id: `analysis-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        source: "사진 분석",
+        boxes: nextBoxes,
+        imageUrl: canvas.toDataURL("image/png", 0.7)
+      };
+      addHistoryEntry(entry);
+    } catch {
+      // ignore history save errors
+    }
   };
 
   const resetImage = () => {
@@ -154,6 +225,19 @@ export default function App() {
     const filename = `safelens-scan-${timestamp}.png`;
     downloadCanvasImage(filename, canvas);
     setStatus("실시간 스캔 캡처를 저장했습니다.");
+
+    try {
+      const entry = {
+        id: `scan-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        source: "실시간 스캔",
+        boxes: liveBoxes,
+        imageUrl: canvas.toDataURL("image/png", 0.7)
+      };
+      addHistoryEntry(entry);
+    } catch {
+      // ignore history save errors
+    }
   };
 
   const startCamera = async () => {
@@ -318,7 +402,7 @@ export default function App() {
       });
     });
 
-    const minFrameCount = Math.max(2, Math.ceil(frames.length * 0.4));
+    const minFrameCount = Math.max(2, Math.ceil(frames.length * 0.5));
     return clusters
       .filter((cluster) => cluster.framesSeen.size >= minFrameCount)
       .map((cluster) => ({
@@ -366,7 +450,7 @@ export default function App() {
         octx.font = "14px sans-serif";
         octx.fillText(`${idx + 1} ${b.risk}`, b.x + 5, Math.max(15, b.y - 6));
       });
-    }, 650);
+    }, 500);
 
     return () => scanTickRef.current && clearInterval(scanTickRef.current);
   }, [cameraOn]);
@@ -510,6 +594,26 @@ export default function App() {
                 </div>
               ))}
             </div>
+            {history.length > 0 && (
+              <section className="panel mt-3">
+                <div className="section-head">
+                  <h3 className="section-title">분석 기록</h3>
+                </div>
+                <div className="history-list">
+                  {history.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="history-item btn btn-outline-secondary mb-2 w-100 text-start"
+                      onClick={() => loadHistoryItem(item)}
+                    >
+                      <div><strong>{item.source}</strong> · {item.boxes?.length || 0}개 후보</div>
+                      <div className="small text-muted">{new Date(item.createdAt).toLocaleString()}</div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
           </section>
         )}
 
