@@ -1,5 +1,4 @@
-import 'dart:async';
-import 'dart:io';
+﻿import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -17,12 +16,13 @@ Future<void> main() async {
 }
 
 class SuspiciousBox {
-  const SuspiciousBox(
-      {required this.x,
-      required this.y,
-      required this.w,
-      required this.h,
-      required this.score});
+  const SuspiciousBox({
+    required this.x,
+    required this.y,
+    required this.w,
+    required this.h,
+    required this.score,
+  });
 
   final int x;
   final int y;
@@ -58,12 +58,8 @@ List<SuspiciousBox> detectSuspiciousSpots(img.Image source) {
   double getRingContrast(int x0, int y0, int x1, int y1, double objectMean) {
     var ringSum = 0.0;
     var ringCount = 0;
-    for (var y = math.max(0, y0 - 2);
-        y <= math.min(height - 1, y1 + 2);
-        y += 1) {
-      for (var x = math.max(0, x0 - 2);
-          x <= math.min(width - 1, x1 + 2);
-          x += 1) {
+    for (var y = math.max(0, y0 - 2); y <= math.min(height - 1, y1 + 2); y += 1) {
+      for (var x = math.max(0, x0 - 2); x <= math.min(width - 1, x1 + 2); x += 1) {
         if (x >= x0 && x <= x1 && y >= y0 && y <= y1) continue;
         ringSum += lum[y * width + x];
         ringCount += 1;
@@ -77,8 +73,7 @@ List<SuspiciousBox> detectSuspiciousSpots(img.Image source) {
     final key = '${(x / 8).round()}-${(y / 8).round()}';
     final previous = boxes[key];
     if (previous == null || previous.score < score) {
-      boxes[key] =
-          SuspiciousBox(x: x, y: y, w: boxWidth, h: boxHeight, score: score);
+      boxes[key] = SuspiciousBox(x: x, y: y, w: boxWidth, h: boxHeight, score: score);
     }
   }
 
@@ -130,31 +125,15 @@ List<SuspiciousBox> detectSuspiciousSpots(img.Image source) {
       final contrast = getRingContrast(minX, minY, maxX, maxY, meanL);
 
       if (isBright) {
-        if (count >= 4 &&
-            area <= 220 &&
-            boxWidth <= 22 &&
-            boxHeight <= 22 &&
-            contrast > 20) {
-          final score = 0.5 +
-              math.min(0.35, contrast / 110) -
-              circularityPenalty(boxWidth, boxHeight);
-          if (score >= 0.52) {
-            addCandidate(minX, minY, boxWidth, boxHeight, score);
-          }
+        if (count >= 4 && area <= 220 && boxWidth <= 22 && boxHeight <= 22 && contrast > 20) {
+          final score = 0.5 + math.min(0.35, contrast / 110) - circularityPenalty(boxWidth, boxHeight);
+          if (score >= 0.52) addCandidate(minX, minY, boxWidth, boxHeight, score);
         }
       } else {
         final ringContrast = contrast * -1;
-        if (count >= 8 &&
-            area <= 340 &&
-            boxWidth <= 30 &&
-            boxHeight <= 30 &&
-            ringContrast > 24) {
-          final score = 0.47 +
-              math.min(0.35, ringContrast / 120) -
-              circularityPenalty(boxWidth, boxHeight);
-          if (score >= 0.5) {
-            addCandidate(minX, minY, boxWidth, boxHeight, score);
-          }
+        if (count >= 8 && area <= 340 && boxWidth <= 30 && boxHeight <= 30 && ringContrast > 24) {
+          final score = 0.47 + math.min(0.35, ringContrast / 120) - circularityPenalty(boxWidth, boxHeight);
+          if (score >= 0.5) addCandidate(minX, minY, boxWidth, boxHeight, score);
         }
       }
     }
@@ -162,8 +141,7 @@ List<SuspiciousBox> detectSuspiciousSpots(img.Image source) {
 
   visitComponents(bright, visitedBright, true);
   visitComponents(dark, visitedDark, false);
-  final result = boxes.values.toList()
-    ..sort((a, b) => b.score.compareTo(a.score));
+  final result = boxes.values.toList()..sort((a, b) => b.score.compareTo(a.score));
   return result.take(8).toList();
 }
 
@@ -177,11 +155,24 @@ class SafeLensApp extends StatelessWidget {
       title: 'SafeLens',
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff1d6fff)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff6f94d9)),
       ),
       home: const SafeLensHome(),
     );
   }
+}
+
+class _Palette {
+  static const bgTop = Color(0xffdfe7f6);
+  static const bgBottom = Color(0xffedf3f8);
+  static const surface = Color(0xfff7f9fd);
+  static const line = Color(0xffc8d3e4);
+  static const text = Color(0xff26324b);
+  static const subText = Color(0xff6d7890);
+  static const chipBg = Color(0xffd8f0ee);
+  static const primaryStart = Color(0xff8daee6);
+  static const primaryEnd = Color(0xff88cfcc);
+  static const danger = Color(0xffcf4550);
 }
 
 class SafeLensHome extends StatefulWidget {
@@ -197,20 +188,28 @@ class _SafeLensHomeState extends State<SafeLensHome> {
   final _placeController = TextEditingController();
   final _descController = TextEditingController();
   final _reportController = TextEditingController();
+
   int _tab = 0;
   ui.Image? _previewImage;
   img.Image? _analysisImage;
   List<SuspiciousBox> _boxes = [];
   CameraController? _cameraController;
-  Timer? _scanTimer;
   bool _cameraOn = false;
   bool _torchOn = false;
-  List<SuspiciousBox> _liveBoxes = [];
-  Size? _liveImageSize;
+  int _selectedHour = 0;
+  int _selectedMinute = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _selectedHour = now.hour;
+    _selectedMinute = (now.minute ~/ 5) * 5;
+    _syncSelectedTimeToText();
+  }
 
   @override
   void dispose() {
-    _scanTimer?.cancel();
     _cameraController?.dispose();
     _timeController.dispose();
     _placeController.dispose();
@@ -225,10 +224,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
     final bytes = await file.readAsBytes();
     final decoded = img.decodeImage(bytes);
     if (decoded == null) return;
-    final resized =
-        decoded.width > 900 ? img.copyResize(decoded, width: 900) : decoded;
-    final codec = await ui
-        .instantiateImageCodec(Uint8List.fromList(img.encodePng(resized)));
+    final resized = decoded.width > 900 ? img.copyResize(decoded, width: 900) : decoded;
+    final codec = await ui.instantiateImageCodec(Uint8List.fromList(img.encodePng(resized)));
     final frame = await codec.getNextFrame();
     setState(() {
       _analysisImage = resized;
@@ -243,6 +240,31 @@ class _SafeLensHomeState extends State<SafeLensHome> {
     setState(() => _boxes = detectSuspiciousSpots(image));
   }
 
+  void _syncSelectedTimeToText() {
+    final hour = _selectedHour.toString().padLeft(2, '0');
+    final minute = _selectedMinute.toString().padLeft(2, '0');
+    _timeController.text = '$hour:$minute';
+  }
+
+  void _onHourChanged(int? value) {
+    if (value == null) return;
+    setState(() {
+      _selectedHour = value;
+      if (_selectedHour == 24) {
+        _selectedMinute = 0;
+      }
+      _syncSelectedTimeToText();
+    });
+  }
+
+  void _onMinuteChanged(int? value) {
+    if (value == null) return;
+    setState(() {
+      _selectedMinute = value;
+      _syncSelectedTimeToText();
+    });
+  }
+
   Future<void> _startCamera() async {
     try {
       final cameras = await availableCameras();
@@ -250,52 +272,23 @@ class _SafeLensHomeState extends State<SafeLensHome> {
         (item) => item.lensDirection == CameraLensDirection.back,
         orElse: () => cameras.first,
       );
-      final controller =
-          CameraController(camera, ResolutionPreset.medium, enableAudio: false);
+      final controller = CameraController(camera, ResolutionPreset.medium, enableAudio: false);
       await controller.initialize();
       setState(() {
         _cameraController = controller;
         _cameraOn = true;
       });
-      _scanTimer = Timer.periodic(
-          const Duration(milliseconds: 700), (_) => _scanCameraFrame());
     } catch (_) {
-      _showMessage('카메라 접근 권한이 필요합니다.');
+      _showMessage('카메라 권한 또는 장치 상태를 확인해주세요.');
     }
-  }
-
-  Future<void> _scanCameraFrame() async {
-    final controller = _cameraController;
-    if (controller == null ||
-        !controller.value.isInitialized ||
-        controller.value.isTakingPicture) {
-      return;
-    }
-    try {
-      final picture = await controller.takePicture();
-      final bytes = await File(picture.path).readAsBytes();
-      final decoded = img.decodeImage(bytes);
-      if (decoded == null || !mounted) return;
-      final resized =
-          decoded.width > 900 ? img.copyResize(decoded, width: 900) : decoded;
-      setState(() {
-        _liveBoxes = detectSuspiciousSpots(resized);
-        _liveImageSize =
-            Size(resized.width.toDouble(), resized.height.toDouble());
-      });
-    } catch (_) {}
   }
 
   Future<void> _stopCamera() async {
-    _scanTimer?.cancel();
-    _scanTimer = null;
     await _cameraController?.dispose();
     setState(() {
       _cameraController = null;
       _cameraOn = false;
       _torchOn = false;
-      _liveBoxes = [];
-      _liveImageSize = null;
     });
   }
 
@@ -307,20 +300,20 @@ class _SafeLensHomeState extends State<SafeLensHome> {
       await controller.setFlashMode(next ? FlashMode.torch : FlashMode.off);
       setState(() => _torchOn = next);
     } catch (_) {
-      _showMessage('이 기기는 플래시 제어를 지원하지 않습니다.');
+      _showMessage('현재 기기에서 플래시 제어를 지원하지 않습니다.');
     }
   }
 
   void _buildReport() {
     _reportController.text = [
       '[몰래카메라 의심 신고 보조 문안]',
-      '1. 발견 일시: ${_timeController.text.isEmpty ? "(미입력)" : _timeController.text}',
+      '1. 발견 시각: ${_timeController.text.isEmpty ? "(미입력)" : _timeController.text}',
       '2. 장소: ${_placeController.text.isEmpty ? "(미입력)" : _placeController.text}',
       '3. 의심 정황:',
       _descController.text.isEmpty ? '(미입력)' : _descController.text,
-      '4. 앱 분석 안내:',
-      '- AI 분석은 의심 지점을 제시했으나 확정 판정은 아님',
-      '- 렌즈 반사 확인 모드로 현장 추가 확인 진행',
+      '4. 참고 안내:',
+      '- AI 분석은 의심 지점을 참고용으로 제시합니다.',
+      '- 현장에서는 실시간 스캔 탭에서 렌즈 반사를 직접 확인하세요.',
     ].join('\n');
   }
 
@@ -330,9 +323,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
       return;
     }
     final dir = await getApplicationDocumentsDirectory();
-    await File('${dir.path}/safelens_report.txt')
-        .writeAsString(_reportController.text);
-    _showMessage('safelens_report.txt로 저장했습니다.');
+    await File('${dir.path}/safelens_report.txt').writeAsString(_reportController.text);
+    _showMessage('safelens_report.txt 파일로 저장했습니다.');
   }
 
   Future<void> _call112() async {
@@ -342,85 +334,228 @@ class _SafeLensHomeState extends State<SafeLensHome> {
     }
   }
 
+  Future<void> _sendSmsReport() async {
+    final reportText = _reportController.text.trim();
+    if (reportText.isEmpty) {
+      _showMessage('먼저 문안 생성 버튼으로 신고 내용을 준비해주세요.');
+      return;
+    }
+
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('문자 신고 확인'),
+          content: const Text(
+            '작성한 내용으로 112 문자 신고를 진행합니다.\n\n'
+            '허위 신고 또는 장난 신고는 처벌 대상이 될 수 있습니다.\n'
+            '내용이 사실에 기반한 신고인지 다시 확인해주세요.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('확인 후 진행'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (approved != true) return;
+
+    final uri = Uri(
+      scheme: 'sms',
+      path: '112',
+      queryParameters: {'body': reportText},
+    );
+
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      _showMessage('문자 앱을 열 수 없습니다. 기기 설정을 확인해주세요.');
+    }
+  }
+
   void _showMessage(String message) {
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.transparent,
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xff070b17), Color(0xff0f1b39)],
+            colors: [_Palette.bgTop, _Palette.bgBottom],
           ),
         ),
         child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Column(
-                children: [
-                  const _SafeLensBar(),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(12),
-                      child: IndexedStack(
-                          index: _tab,
-                          children: [_analysisTab(), _scanTab(), _reportTab()]),
-                    ),
+          child: Column(
+            children: [
+              const _TopHeader(),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: _tab == 0
+                        ? _homeTab()
+                        : _tab == 1
+                            ? _analysisTab()
+                            : _tab == 2
+                                ? _scanTab()
+                                : _reportTab(),
                   ),
-                  _BottomTabs(
-                      selected: _tab,
-                      onChanged: (value) => setState(() => _tab = value)),
-                ],
+                ),
               ),
-            ),
+              _BottomTabs(selected: _tab, onChanged: (value) => setState(() => _tab = value)),
+            ],
           ),
         ),
       ),
     );
   }
 
+  Widget _homeTab() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 138,
+          height: 138,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 16, offset: Offset(0, 8))],
+          ),
+          child: Image.asset('public/app-icon.png'),
+        ),
+        const SizedBox(height: 20),
+        const Text(
+          'SafeLens',
+          style: TextStyle(fontSize: 68 / 1.8, fontWeight: FontWeight.w800, color: _Palette.text),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          '사진 분석과 실시간 반사 확인으로 의심 후보를 빠르게 표시합니다.',
+          style: TextStyle(fontSize: 18, color: _Palette.subText, height: 1.35),
+        ),
+        const SizedBox(height: 22),
+        _HomeLinkCard(
+          icon: Icons.search,
+          title: '사진 분석',
+          status: _boxes.isEmpty ? '탐지 전' : '탐지 ${_boxes.length}건',
+          onTap: () => setState(() => _tab = 1),
+          highlighted: true,
+        ),
+        const SizedBox(height: 12),
+        _HomeLinkCard(
+          icon: Icons.radio_button_checked,
+          title: '실시간 스캔',
+          status: _cameraOn ? (_torchOn ? '플래시 켜짐' : '준비됨') : '탐지 전',
+          onTap: () => setState(() => _tab = 2),
+        ),
+        const SizedBox(height: 12),
+        _HomeLinkCard(
+          icon: Icons.priority_high,
+          title: '신고 보조',
+          status: _reportController.text.trim().isEmpty ? '문안 생성' : '문안 준비됨',
+          onTap: () => setState(() => _tab = 3),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _Palette.line),
+          ),
+          child: const Text(
+            '앱 결과는 확정 판정이 아니라 신고와 현장 확인을 돕는 참고 정보입니다.',
+            style: TextStyle(color: _Palette.subText, fontSize: 16, height: 1.4),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _analysisTab() {
     return _Panel(
+      title: '의심 장소 분석',
+      status: _boxes.isEmpty ? '탐지 전' : '탐지 ${_boxes.length}건',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionTitle('의심 장소 분석'),
-          SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                  onPressed: _pickImage, child: const Text('이미지 선택'))),
-          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                  child: FilledButton(
-                      onPressed: _analysisImage == null ? null : _analyzeImage,
-                      child: const Text('AI 분석'))),
-              const SizedBox(width: 8),
+                child: _ActionButton(
+                  label: '사진 선택',
+                  filled: true,
+                  onTap: _pickImage,
+                ),
+              ),
+              const SizedBox(width: 10),
               Expanded(
-                  child: OutlinedButton(
-                      onPressed: _analysisImage == null
-                          ? null
-                          : () => setState(() => _boxes = []),
-                      child: const Text('초기화'))),
+                child: _ActionButton(
+                  label: '초기화',
+                  onTap: _analysisImage == null ? null : () => setState(() => _boxes = []),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _ActionButton(
+                  label: '분석',
+                  compact: true,
+                  filled: true,
+                  onTap: _analysisImage == null ? null : _analyzeImage,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
           _ImagePreview(image: _previewImage, boxes: _boxes),
           const SizedBox(height: 10),
-          Text(_boxes.isEmpty
-              ? '의심 지점이 없거나 식별되지 않았습니다.'
-              : '의심 지점 ${_boxes.length}개가 표시되었습니다.'),
-          for (var i = 0; i < _boxes.length; i += 1)
-            Text('#${i + 1} 좌표 (${_boxes[i].x}, ${_boxes[i].y})'),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _boxes.isEmpty ? '사진을 선택한 뒤 분석을 실행하세요.' : '의심 지점 좌표를 확인해 현장 스캔으로 이동하세요.',
+              style: const TextStyle(color: _Palette.subText, fontSize: 16),
+            ),
+          ),
+          const SizedBox(height: 8),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: _Palette.line),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: SizedBox(
+              width: double.infinity,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  _boxes.isEmpty
+                      ? '분석 결과가 여기에 표시됩니다.'
+                      : _boxes.asMap().entries.map((e) => '#${e.key + 1} (${e.value.x}, ${e.value.y})').join('  /  '),
+                  style: const TextStyle(color: _Palette.subText, fontSize: 16),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -429,26 +564,33 @@ class _SafeLensHomeState extends State<SafeLensHome> {
   Widget _scanTab() {
     final controller = _cameraController;
     return _Panel(
+      title: '실시간 반사 확인',
+      status: _cameraOn ? (_torchOn ? '플래시 켜짐' : '카메라 켜짐') : '대기 중',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionTitle('렌즈 반사 확인'),
+          const Text(
+            '이 화면은 AI 탐지가 아니라, 사용자가 플래시 반사를 직접 확인하는 현장 도구입니다.',
+            style: TextStyle(color: _Palette.subText, fontSize: 16),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                  child: FilledButton(
-                      onPressed: _cameraOn ? null : _startCamera,
-                      child: const Text('시작'))),
-              const SizedBox(width: 8),
+                child: _ActionButton(label: '시작', filled: true, onTap: _cameraOn ? null : _startCamera),
+              ),
+              const SizedBox(width: 10),
               Expanded(
-                  child: OutlinedButton(
-                      onPressed: _cameraOn ? _stopCamera : null,
-                      child: const Text('중지'))),
-              const SizedBox(width: 8),
+                child: _ActionButton(label: '중지', onTap: _cameraOn ? _stopCamera : null),
+              ),
+              const SizedBox(width: 10),
               Expanded(
-                  child: FilledButton.tonal(
-                      onPressed: _cameraOn ? _toggleFlash : null,
-                      child: Text(_torchOn ? '플래시 끄기' : '플래시'))),
+                child: _ActionButton(
+                  label: _torchOn ? '플래시 끄기' : '플래시',
+                  filled: _torchOn,
+                  onTap: _cameraOn ? _toggleFlash : null,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -456,12 +598,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
             aspectRatio: controller?.value.aspectRatio ?? 4 / 3,
             child: _PreviewFrame(
               child: controller == null || !controller.value.isInitialized
-                  ? const Center(child: Text('카메라 대기 중'))
-                  : Stack(fit: StackFit.expand, children: [
-                      CameraPreview(controller),
-                      CustomPaint(
-                          painter: BoxPainter(_liveBoxes, _liveImageSize))
-                    ]),
+                  ? const Center(child: Text('카메라 시작 후 이곳에서 반사 확인'))
+                  : CameraPreview(controller),
             ),
           ),
         ],
@@ -471,73 +609,105 @@ class _SafeLensHomeState extends State<SafeLensHome> {
 
   Widget _reportTab() {
     return _Panel(
+      title: '신고 보조',
+      status: '문안 생성',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionTitle('신고 보조'),
-          _Field(controller: _timeController, hint: '발견 일시'),
-          _Field(controller: _placeController, hint: '장소'),
+          _TimeSelector(
+            selectedHour: _selectedHour,
+            selectedMinute: _selectedMinute,
+            onHourChanged: _onHourChanged,
+            onMinuteChanged: _selectedHour == 24 ? null : _onMinuteChanged,
+          ),
+          _Field(controller: _placeController, hint: '현재 위치 또는 장소'),
           _Field(controller: _descController, hint: '의심 정황', lines: 4),
           Row(
             children: [
               Expanded(
-                  child: FilledButton(
-                      onPressed: _buildReport, child: const Text('문안 생성'))),
+                child: _ActionButton(label: '문안 생성', filled: true, onTap: _buildReport),
+              ),
               const SizedBox(width: 8),
               Expanded(
-                  child: OutlinedButton(
-                      onPressed: _saveReport, child: const Text('저장'))),
+                child: _ActionButton(label: '저장', onTap: _saveReport),
+              ),
               const SizedBox(width: 8),
               Expanded(
+                child: _ActionButton(label: '문자 신고', onTap: _sendSmsReport),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SizedBox(
+                  height: 54,
                   child: FilledButton(
-                      style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xffdc3545)),
-                      onPressed: _call112,
-                      child: const Text('112'))),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _Palette.danger,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    ),
+                    onPressed: _call112,
+                    child: const Text('112', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          _Field(
-              controller: _reportController,
-              hint: '신고 문안',
-              lines: 9,
-              readOnly: true),
+          const SizedBox(height: 8),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '문안 생성 후 문자 신고 또는 112 전화 신고를 선택할 수 있습니다.',
+              style: TextStyle(color: _Palette.subText, fontSize: 14),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _Field(controller: _reportController, hint: '신고 문안', lines: 10, readOnly: true),
         ],
       ),
     );
   }
 }
 
-class _SafeLensBar extends StatelessWidget {
-  const _SafeLensBar();
+class _TopHeader extends StatelessWidget {
+  const _TopHeader();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 72,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      color: const Color(0xee081025),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      color: Colors.white.withValues(alpha: 0.6),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(children: [
-            ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child:
-                    Image.asset('public/app-icon.png', width: 30, height: 30)),
-            const SizedBox(width: 10),
-            const Text('SafeLens',
-                style: TextStyle(
-                    color: Color(0xffeef4ff), fontWeight: FontWeight.w700)),
-          ]),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+            width: 52,
+            height: 52,
             decoration: BoxDecoration(
-                color: const Color(0x3312d8fa),
-                border: Border.all(color: const Color(0x7312d8fa)),
-                borderRadius: BorderRadius.circular(999)),
-            child: const Text('Private Scan',
-                style: TextStyle(color: Color(0xffeef4ff), fontSize: 12)),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 8, offset: Offset(0, 2))],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: Image.asset('public/app-icon.png'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('SafeLens', style: TextStyle(fontSize: 42 / 1.8, fontWeight: FontWeight.w800, color: _Palette.text)),
+                SizedBox(height: 2),
+                Text('몰래카메라 의심 위치 탐지 보조', style: TextStyle(fontSize: 16, color: _Palette.subText)),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            decoration: BoxDecoration(
+              color: _Palette.chipBg,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: const Color(0xffa6d8d7), width: 1.6),
+            ),
+            child: const Text('Private', style: TextStyle(fontSize: 18, color: Color(0xff3f6579))),
           ),
         ],
       ),
@@ -547,59 +717,120 @@ class _SafeLensBar extends StatelessWidget {
 
 class _BottomTabs extends StatelessWidget {
   const _BottomTabs({required this.selected, required this.onChanged});
+
   final int selected;
   final ValueChanged<int> onChanged;
 
   @override
   Widget build(BuildContext context) {
+    final items = <({IconData icon, String label})>[
+      (icon: Icons.home_outlined, label: '홈'),
+      (icon: Icons.search, label: '분석'),
+      (icon: Icons.radio_button_checked, label: '스캔'),
+      (icon: Icons.priority_high, label: '신고'),
+    ];
+
     return Container(
-      height: 78,
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-      color: const Color(0xee081025),
-      child: Row(children: [
-        _TabButton(
-            label: '⌕', active: selected == 0, onTap: () => onChanged(0)),
-        const SizedBox(width: 14),
-        _TabButton(
-            label: '◉', active: selected == 1, onTap: () => onChanged(1)),
-        const SizedBox(width: 14),
-        _TabButton(
-            label: '🚨', active: selected == 2, onTap: () => onChanged(2)),
-      ]),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.75),
+        border: const Border(top: BorderSide(color: Color(0xffd5deeb))),
+      ),
+      child: Row(
+        children: List.generate(items.length, (index) {
+          final item = items[index];
+          final active = selected == index;
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(22),
+                onTap: () => onChanged(index),
+                child: Ink(
+                  height: 92,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(22),
+                    color: active ? null : const Color(0xffeef2f8),
+                    gradient: active
+                        ? const LinearGradient(colors: [_Palette.primaryStart, _Palette.primaryEnd])
+                        : null,
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(item.icon, size: 28, color: const Color(0xff4f5e7b)),
+                      const SizedBox(height: 6),
+                      Text(
+                        item.label,
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xff4f5e7b)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
     );
   }
 }
 
-class _TabButton extends StatelessWidget {
-  const _TabButton(
-      {required this.label, required this.active, required this.onTap});
-  final String label;
-  final bool active;
+class _HomeLinkCard extends StatelessWidget {
+  const _HomeLinkCard({
+    required this.icon,
+    required this.title,
+    required this.status,
+    required this.onTap,
+    this.highlighted = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String status;
   final VoidCallback onTap;
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: SizedBox(
-        height: 46,
-        child: DecoratedBox(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: active
-                ? const LinearGradient(
-                    colors: [Color(0xff1d6fff), Color(0xff00b6ff)])
-                : null,
-            color: active ? null : Colors.white.withValues(alpha: 0.08),
+            color: Colors.white.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: highlighted ? const Color(0xffadc2ea) : _Palette.line,
+              width: 1.6,
+            ),
           ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: onTap,
-            child: Center(
-                child: Text(label,
-                    style: TextStyle(
-                        fontSize: 22,
-                        color:
-                            active ? Colors.white : const Color(0xffbed2ff)))),
+          child: Row(
+            children: [
+              Container(
+                width: 74,
+                height: 74,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [_Palette.primaryStart, _Palette.primaryEnd]),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Icon(icon, size: 36, color: const Color(0xff2f3b58)),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _Palette.text),
+                ),
+              ),
+              Text(
+                status,
+                style: const TextStyle(fontSize: 19, color: _Palette.subText, fontWeight: FontWeight.w700),
+              ),
+            ],
           ),
         ),
       ),
@@ -608,7 +839,10 @@ class _TabButton extends StatelessWidget {
 }
 
 class _Panel extends StatelessWidget {
-  const _Panel({required this.child});
+  const _Panel({required this.title, required this.status, required this.child});
+
+  final String title;
+  final String status;
   final Widget child;
 
   @override
@@ -616,39 +850,186 @@ class _Panel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xe0f5f8ff),
-        border: Border.all(color: const Color(0x6baabfde)),
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: const [
-          BoxShadow(
-              color: Color(0x3d08193d), blurRadius: 34, offset: Offset(0, 14))
+        color: _Palette.surface,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: _Palette.line, width: 1.4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: _Palette.text),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  border: Border.all(color: _Palette.line, width: 1.4),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  status,
+                  style: const TextStyle(fontSize: 14, color: _Palette.subText, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          child,
         ],
       ),
-      child: child,
     );
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.text);
-  final String text;
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({
+    required this.label,
+    required this.onTap,
+    this.filled = false,
+    this.compact = false,
+  });
+
+  final String label;
+  final VoidCallback? onTap;
+  final bool filled;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    return SizedBox(
+      height: compact ? 48 : 54,
+      child: FilledButton(
+        style: FilledButton.styleFrom(
+          backgroundColor: filled ? null : Colors.transparent,
+          foregroundColor: filled ? _Palette.text : _Palette.subText,
+          disabledBackgroundColor: const Color(0xffe5ebf5),
+          disabledForegroundColor: const Color(0xff9ba8bd),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: filled ? Colors.transparent : _Palette.line, width: 1.5),
+          ),
+          elevation: 0,
+          padding: EdgeInsets.zero,
+        ).copyWith(
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) return const Color(0xffe5ebf5);
+            if (!filled) return Colors.transparent;
+            return null;
+          }),
+        ),
+        onPressed: onTap,
+        child: Ink(
+          decoration: filled
+              ? BoxDecoration(
+                  gradient: const LinearGradient(colors: [_Palette.primaryStart, _Palette.primaryEnd]),
+                  borderRadius: BorderRadius.circular(18),
+                )
+              : null,
+          child: Center(
+            child: Text(label, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TimeSelector extends StatelessWidget {
+  const _TimeSelector({
+    required this.selectedHour,
+    required this.selectedMinute,
+    required this.onHourChanged,
+    required this.onMinuteChanged,
+  });
+
+  final int selectedHour;
+  final int selectedMinute;
+  final ValueChanged<int?> onHourChanged;
+  final ValueChanged<int?>? onMinuteChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final hours = List<int>.generate(25, (index) => index);
+    final minutes = List<int>.generate(12, (index) => index * 5);
+    final minuteDisabled = onMinuteChanged == null;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Text(text,
-          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _Palette.line, width: 1.5),
+        ),
+        child: Row(
+          children: [
+            const Text('발견 시각', style: TextStyle(fontSize: 17, color: _Palette.subText)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DropdownButtonFormField<int>(
+                value: selectedHour,
+                decoration: _timeInputDecoration('시'),
+                items: hours
+                    .map((hour) => DropdownMenuItem<int>(
+                          value: hour,
+                          child: Text(hour.toString().padLeft(2, '0')),
+                        ))
+                    .toList(),
+                onChanged: onHourChanged,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButtonFormField<int>(
+                value: minuteDisabled ? 0 : selectedMinute,
+                decoration: _timeInputDecoration('분'),
+                items: minutes
+                    .map((minute) => DropdownMenuItem<int>(
+                          value: minute,
+                          child: Text(minute.toString().padLeft(2, '0')),
+                        ))
+                    .toList(),
+                onChanged: onMinuteChanged,
+              ),
+            ),
+            if (minuteDisabled) ...[
+              const SizedBox(width: 8),
+              const Text('(24시는 00분만)', style: TextStyle(fontSize: 12, color: _Palette.subText)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _timeInputDecoration(String suffixText) {
+    return InputDecoration(
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      suffixText: suffixText,
+      filled: true,
+      fillColor: Colors.white,
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _Palette.line, width: 1.2),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xff9fb8e8), width: 1.4),
+      ),
     );
   }
 }
 
 class _Field extends StatelessWidget {
-  const _Field(
-      {required this.controller,
-      required this.hint,
-      this.lines = 1,
-      this.readOnly = false});
+  const _Field({required this.controller, required this.hint, this.lines = 1, this.readOnly = false});
+
   final TextEditingController controller;
   final String hint;
   final int lines;
@@ -657,18 +1038,27 @@ class _Field extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: TextField(
         controller: controller,
         minLines: lines,
         maxLines: lines,
         readOnly: readOnly,
+        style: const TextStyle(fontSize: 17, color: _Palette.text),
         decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.white,
-            hintText: hint,
-            border:
-                OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+          filled: true,
+          fillColor: Colors.white.withValues(alpha: 0.72),
+          hintText: hint,
+          hintStyle: const TextStyle(color: _Palette.subText),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: _Palette.line, width: 1.5),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: Color(0xff9fb8e8), width: 1.8),
+          ),
+        ),
       ),
     );
   }
@@ -676,22 +1066,25 @@ class _Field extends StatelessWidget {
 
 class _PreviewFrame extends StatelessWidget {
   const _PreviewFrame({required this.child});
+
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-          color: const Color(0xffeef4ff),
-          border: Border.all(color: const Color(0xffb9c9e2)),
-          borderRadius: BorderRadius.circular(16)),
-      child: ClipRRect(borderRadius: BorderRadius.circular(16), child: child),
+        color: Colors.white.withValues(alpha: 0.75),
+        border: Border.all(color: _Palette.line, width: 1.5),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: ClipRRect(borderRadius: BorderRadius.circular(22), child: child),
     );
   }
 }
 
 class _ImagePreview extends StatelessWidget {
   const _ImagePreview({required this.image, required this.boxes});
+
   final ui.Image? image;
   final List<SuspiciousBox> boxes;
 
@@ -702,7 +1095,9 @@ class _ImagePreview extends StatelessWidget {
       child: AspectRatio(
         aspectRatio: current == null ? 4 / 3 : current.width / current.height,
         child: current == null
-            ? const Center(child: Text('이미지 대기 중'))
+            ? const Center(
+                child: Text('선택한 이미지가 여기에 표시됩니다.', style: TextStyle(color: _Palette.subText)),
+              )
             : CustomPaint(painter: ImageBoxPainter(current, boxes)),
       ),
     );
@@ -711,18 +1106,19 @@ class _ImagePreview extends StatelessWidget {
 
 class ImageBoxPainter extends CustomPainter {
   const ImageBoxPainter(this.image, this.boxes);
+
   final ui.Image image;
   final List<SuspiciousBox> boxes;
 
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawImageRect(
-        image,
-        Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-        Rect.fromLTWH(0, 0, size.width, size.height),
-        Paint());
-    BoxPainter(boxes, Size(image.width.toDouble(), image.height.toDouble()))
-        .paint(canvas, size);
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint(),
+    );
+    BoxPainter(boxes, Size(image.width.toDouble(), image.height.toDouble())).paint(canvas, size);
   }
 
   @override
@@ -732,6 +1128,7 @@ class ImageBoxPainter extends CustomPainter {
 
 class BoxPainter extends CustomPainter {
   const BoxPainter(this.boxes, this.sourceSize);
+
   final List<SuspiciousBox> boxes;
   final Size? sourceSize;
 
@@ -739,6 +1136,7 @@ class BoxPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final source = sourceSize;
     if (source == null || source.width == 0 || source.height == 0) return;
+
     final sx = size.width / source.width;
     final sy = size.height / source.height;
     final stroke = Paint()
@@ -749,18 +1147,19 @@ class BoxPainter extends CustomPainter {
 
     for (var i = 0; i < boxes.length; i += 1) {
       final box = boxes[i];
-      final rect =
-          Rect.fromLTWH(box.x * sx, box.y * sy, box.w * sx, box.h * sy);
+      final rect = Rect.fromLTWH(box.x * sx, box.y * sy, box.w * sx, box.h * sy);
       canvas.drawRect(rect, stroke);
+
       final textPainter = TextPainter(
         text: TextSpan(
-            text: '의심 ${i + 1}',
-            style: const TextStyle(color: Colors.white, fontSize: 12)),
+          text: '의심 ${i + 1}',
+          style: const TextStyle(color: Colors.white, fontSize: 12),
+        ),
         textDirection: TextDirection.ltr,
       )..layout();
+
       final top = math.max(0.0, rect.top - 18);
-      canvas.drawRect(
-          Rect.fromLTWH(rect.left, top, textPainter.width + 8, 18), labelBg);
+      canvas.drawRect(Rect.fromLTWH(rect.left, top, textPainter.width + 8, 18), labelBg);
       textPainter.paint(canvas, Offset(rect.left + 4, top + 2));
     }
   }
