@@ -380,6 +380,12 @@ class _SafeLensHomeState extends State<SafeLensHome> {
     }
   }
 
+  void _openHelpPage() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const _HelpPage()),
+    );
+  }
+
   void _showMessage(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -471,6 +477,13 @@ class _SafeLensHomeState extends State<SafeLensHome> {
           title: '신고 보조',
           status: _reportController.text.trim().isEmpty ? '문안 생성' : '문안 준비됨',
           onTap: () => setState(() => _tab = 3),
+        ),
+        const SizedBox(height: 12),
+        _HomeLinkCard(
+          icon: Icons.volunteer_activism_outlined,
+          title: '도움 받기',
+          status: '대처 안내',
+          onTap: _openHelpPage,
         ),
         const SizedBox(height: 12),
         Container(
@@ -658,6 +671,11 @@ class _SafeLensHomeState extends State<SafeLensHome> {
               style: TextStyle(color: _Palette.subText, fontSize: 14),
             ),
           ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: _ActionButton(label: '피해 대처 안내 보기', onTap: _openHelpPage),
+          ),
           const SizedBox(height: 10),
           _Field(controller: _reportController, hint: '신고 문안', lines: 10, readOnly: true),
         ],
@@ -710,6 +728,126 @@ class _TopHeader extends StatelessWidget {
             child: const Text('Private', style: TextStyle(fontSize: 18, color: Color(0xff3f6579))),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _HelpPage extends StatelessWidget {
+  const _HelpPage();
+
+  static const _d4uUrl = 'https://d4u.stop.or.kr/main';
+  static const _regionUrl = 'https://d4u.stop.or.kr/about/region/info';
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened) {
+      await launchUrl(uri);
+    }
+  }
+
+  Future<void> _call(String phone) async {
+    final uri = Uri.parse('tel:$phone');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [_Palette.bgTop, _Palette.bgBottom],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              const _TopHeader(),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: _Panel(
+                      title: '도움 받기',
+                      status: '대처 안내',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '불안하거나 피해가 의심될 때 바로 확인할 수 있는 대응 순서입니다.',
+                            style: TextStyle(color: _Palette.subText, fontSize: 16, height: 1.4),
+                          ),
+                          const SizedBox(height: 12),
+                          _HelpSection(
+                            icon: Icons.emergency_outlined,
+                            title: '지금 바로 할 일',
+                            items: const [
+                              '긴급하거나 위험하면 즉시 112로 신고합니다.',
+                              '가능하면 안전한 장소로 이동하고 주변에 도움을 요청합니다.',
+                              '가해자와 직접 대면하거나 혼자 삭제를 요구하지 않습니다.',
+                            ],
+                            actions: [
+                              _HelpAction(label: '112 전화', onTap: () => _call('112'), danger: true),
+                              _HelpAction(label: '1366 전화', onTap: () => _call('1366')),
+                            ],
+                          ),
+                          _HelpSection(
+                            icon: Icons.inventory_2_outlined,
+                            title: '증거 보존',
+                            items: const [
+                              '게시물 URL, 계정명, 업로드 시각, 캡처 화면을 보관합니다.',
+                              '가능하면 원본 파일과 화면 녹화도 따로 보관합니다.',
+                              '신고나 삭제 요청 전 증거가 사라지지 않도록 먼저 정리합니다.',
+                              '불법촬영물을 불필요하게 재전송하거나 공유하지 않습니다.',
+                            ],
+                          ),
+                          _HelpSection(
+                            icon: Icons.account_balance_outlined,
+                            title: '공공 지원',
+                            items: const [
+                              '중앙디지털성범죄피해자지원센터에서 상담, 삭제지원, 모니터링, 수사·법률·의료 연계를 받을 수 있습니다.',
+                              '여성긴급전화 1366은 365일 24시간 초기 상담을 지원합니다.',
+                              '지역 디지털성범죄피해자지원센터도 상담과 삭제 연계를 제공합니다.',
+                            ],
+                            actions: [
+                              _HelpAction(label: '센터 열기', onTap: () => _openUrl(_d4uUrl)),
+                              _HelpAction(label: '지역 센터', onTap: () => _openUrl(_regionUrl)),
+                            ],
+                          ),
+                          _HelpSection(
+                            icon: Icons.cleaning_services_outlined,
+                            title: '삭제 지원',
+                            items: const [
+                              '우선 공공기관의 삭제지원과 모니터링을 확인합니다.',
+                              '민간 삭제 대행 서비스는 비용, 환불 조건, 삭제 가능 범위, 개인정보 제공 범위를 확인해야 합니다.',
+                              '앱에서는 이런 서비스를 디지털 장의사 또는 온라인 게시물 삭제 대행으로 안내할 수 있습니다.',
+                            ],
+                          ),
+                          _HelpSection(
+                            icon: Icons.favorite_border,
+                            title: '법률·심리 지원',
+                            items: const [
+                              '수사 진행, 법률 상담, 의료 지원, 심리 상담을 함께 요청할 수 있습니다.',
+                              '혼자 판단하기 어렵다면 상담기관을 통해 필요한 기관으로 연계받는 방식이 안전합니다.',
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -882,6 +1020,118 @@ class _Panel extends StatelessWidget {
           child,
         ],
       ),
+    );
+  }
+}
+
+class _HelpSection extends StatelessWidget {
+  const _HelpSection({
+    required this.icon,
+    required this.title,
+    required this.items,
+    this.actions = const [],
+  });
+
+  final IconData icon;
+  final String title;
+  final List<String> items;
+  final List<_HelpAction> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _Palette.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [_Palette.primaryStart, _Palette.primaryEnd]),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: _Palette.text),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: _Palette.text),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (final item in items)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 7),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: SizedBox(
+                      width: 5,
+                      height: 5,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(color: _Palette.subText, shape: BoxShape.circle),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      item,
+                      style: const TextStyle(fontSize: 15, color: _Palette.subText, height: 1.35),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (actions.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: actions,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _HelpAction extends StatelessWidget {
+  const _HelpAction({
+    required this.label,
+    required this.onTap,
+    this.danger = false,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: danger ? _Palette.danger : _Palette.text,
+        side: BorderSide(color: danger ? _Palette.danger : _Palette.line, width: 1.4),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      onPressed: onTap,
+      child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
     );
   }
 }
