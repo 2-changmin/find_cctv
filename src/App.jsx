@@ -352,7 +352,7 @@ export default function App() {
     const history = scanHistoryRef.current;
     history.push(nextBoxes);
     if (history.length > 6) history.shift();
-    if (history.length < 2) return nextBoxes;
+    if (history.length < 2) return [];
 
     const frames = history.slice(-5);
     const clusters = [];
@@ -402,7 +402,7 @@ export default function App() {
       });
     });
 
-    const minFrameCount = Math.max(2, Math.ceil(frames.length * 0.5));
+    const minFrameCount = Math.max(2, Math.ceil(frames.length * 0.45));
     return clusters
       .filter((cluster) => cluster.framesSeen.size >= minFrameCount)
       .map((cluster) => ({
@@ -435,7 +435,8 @@ export default function App() {
       const nextLiveBoxes = detectSuspiciousSpots(tctx, temp.width, temp.height, {
         maxResults: 5,
         sensitivity,
-        minConfidence
+        minConfidence,
+        liveMode: true
       });
       const stableBoxes = mergeScanFrames(nextLiveBoxes);
       setLiveBoxes(stableBoxes);
@@ -453,7 +454,7 @@ export default function App() {
     }, 500);
 
     return () => scanTickRef.current && clearInterval(scanTickRef.current);
-  }, [cameraOn]);
+  }, [cameraOn, sensitivity, minConfidence]);
 
   useEffect(() => () => stopCamera(), []);
 
@@ -645,7 +646,7 @@ export default function App() {
               {showSettingsButton
                 ? status
                 : cameraOn
-                ? `현재 후보 ${liveBoxes.length}개 · 색상은 위험도 기준입니다.`
+                ? `현재 후보 ${liveBoxes.length}개 · 여러 프레임에서 반복 확인된 위치만 표시합니다.`
                 : "시작을 누르면 후면 카메라로 확인합니다."}
             </p>
             {showSettingsButton && (
