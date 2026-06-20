@@ -40,6 +40,7 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
   const minConfidence = options.minConfidence ?? 0;
   const liveMode = Boolean(options.liveMode);
   const sensitivity = options.sensitivity || "normal";
+  const previousImage = options.previousImageData || null;
   const config = {
     low: { local: 30, darkDelta: 34, brightDelta: 42, minScore: 0.66, fallbackScore: 0.6, maxOut: 3 },
     normal: { local: 26, darkDelta: 24, brightDelta: 30, minScore: 0.58, fallbackScore: 0.52, maxOut: 4 },
@@ -57,11 +58,17 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
       }
     : config;
 
-  const image = ctx2d.getImageData(0, 0, w, h);
+  const image = options.imageData || ctx2d.getImageData(0, 0, w, h);
   const px = image.data;
+  const previousPx =
+    previousImage && previousImage.width === w && previousImage.height === h && previousImage.data?.length === px.length
+      ? previousImage.data
+      : null;
   const total = w * h;
   const lum = new Float32Array(total);
   const sat = new Float32Array(total);
+  const positiveDiff = previousPx ? new Float32Array(total) : null;
+  let globalDeltaSum = 0;
 
   for (let i = 0; i < total; i += 1) {
     const r = px[i * 4];
@@ -69,6 +76,20 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
     const b = px[i * 4 + 2];
     lum[i] = r * 0.299 + g * 0.587 + b * 0.114;
     sat[i] = colorSaturation(r, g, b);
+    if (positiveDiff) {
+      const prev = previousPx[i * 4] * 0.299 + previousPx[i * 4 + 1] * 0.587 + previousPx[i * 4 + 2] * 0.114;
+      const delta = lum[i] - prev;
+      positiveDiff[i] = delta;
+      globalDeltaSum += delta;
+    }
+  }
+
+  if (positiveDiff) {
+    const globalDelta = globalDeltaSum / Math.max(1, total);
+    for (let i = 0; i < total; i += 1) {
+      const normalized = positiveDiff[i] - globalDelta;
+      positiveDiff[i] = normalized > 6 ? normalized : 0;
+    }
   }
 
   const integral = new Float64Array((w + 1) * (h + 1));
@@ -215,6 +236,8 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
     let ringSum = 0;
     let ringCount = 0;
     let brightCount = 0;
+    let coreBrightCount = 0;
+    let outerBrightCount = 0;
     const outer = Math.ceil(radius * 1.85);
 
     for (let y = Math.max(0, Math.floor(spot.cy - outer)); y <= Math.min(h - 1, Math.ceil(spot.cy + outer)); y += 1) {
@@ -224,20 +247,91 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
         if (dist <= radius * 0.55) {
           innerSum += value;
           innerCount += 1;
+          if (value >= 218) coreBrightCount += 1;
         } else if (dist <= radius * 1.85) {
           ringSum += value;
           ringCount += 1;
+          if (value >= 218) outerBrightCount += 1;
         }
         if (dist <= radius * 1.85 && value >= 210) brightCount += 1;
       }
     }
 
+    const coreBrightRatio = innerCount ? coreBrightCount / innerCount : 0;
+    const outerBrightRatio = ringCount ? outerBrightCount / ringCount : 0;
+
     return {
       center: innerCount ? innerSum / innerCount : spot.mean,
       ring: ringCount ? ringSum / ringCount : spot.mean,
       contrast: Math.abs((ringCount ? ringSum / ringCount : spot.mean) - (innerCount ? innerSum / innerCount : spot.mean)),
-      brightRatio: (innerCount + ringCount) ? brightCount / (innerCount + ringCount) : 0
+      brightRatio: (innerCount + ringCount) ? brightCount / (innerCount + ringCount) : 0,
+      compactHighlight: clamp01((coreBrightRatio - outerBrightRatio + 0.03) / 0.18)
     };
+  };
+
+  const flashDeltaStats = (spot) => {
+    if (!positiveDiff) return { score: 0, mean: 0, peak: 0, hotRatio: 0 };
+    const radius = Math.max(4, Math.min(liveMode ? 42 : 64, Math.max(spot.w, spot.h) * 0.85));
+    let sum = 0;
+    let count = 0;
+    let hot = 0;
+    let peak = 0;
+
+    for (let y = Math.max(0, Math.floor(spot.cy - radius)); y <= Math.min(h - 1, Math.ceil(spot.cy + radius)); y += 1) {
+      for (let x = Math.max(0, Math.floor(spot.cx - radius)); x <= Math.min(w - 1, Math.ceil(spot.cx + radius)); x += 1) {
+        if (Math.hypot(x - spot.cx, y - spot.cy) > radius) continue;
+        const delta = positiveDiff[y * w + x];
+        sum += delta;
+        count += 1;
+        if (delta >= 24) hot += 1;
+        peak = Math.max(peak, delta);
+      }
+    }
+
+    const mean = count ? sum / count : 0;
+    const hotRatio = count ? hot / count : 0;
+    return {
+      mean,
+      peak,
+      hotRatio,
+      score: clamp01(mean / 28) * 0.45 + clamp01(peak / 70) * 0.35 + clamp01(hotRatio / 0.16) * 0.2
+    };
+  };
+
+  const sampleLum = (x, y) => {
+    const sx = Math.max(0, Math.min(w - 1, Math.round(x)));
+    const sy = Math.max(0, Math.min(h - 1, Math.round(y)));
+    return lum[sy * w + sx];
+  };
+
+  const radialSymmetryScore = (spot) => {
+    const radius = Math.max(4, Math.min(liveMode ? 36 : 58, Math.max(spot.w, spot.h) * 0.58));
+    const samples = [];
+    const pairs = 12;
+    for (let i = 0; i < pairs; i += 1) {
+      const angle = (Math.PI * 2 * i) / pairs;
+      const x = spot.cx + Math.cos(angle) * radius;
+      const y = spot.cy + Math.sin(angle) * radius;
+      samples.push(sampleLum(x, y));
+    }
+
+    const mean = samples.reduce((acc, value) => acc + value, 0) / samples.length;
+    const variance = samples.reduce((acc, value) => acc + (value - mean) ** 2, 0) / samples.length;
+    const std = Math.sqrt(variance);
+    let pairDiff = 0;
+    for (let i = 0; i < pairs / 2; i += 1) {
+      pairDiff += Math.abs(samples[i] - samples[i + pairs / 2]);
+    }
+    const oppositeScore = clamp01(1 - pairDiff / (pairs * 24));
+    const evennessScore = clamp01(1 - std / 46);
+    return evennessScore * 0.58 + oppositeScore * 0.42;
+  };
+
+  const glarePenalty = (spot, radial) => {
+    const diameter = Math.max(spot.w, spot.h);
+    const largeBrightPatch = spot.kind !== "dark" && diameter > (liveMode ? 34 : 48) && spot.fill > 0.58;
+    const broadHighlight = radial.brightRatio > 0.34;
+    return (largeBrightPatch ? 0.18 : 0) + (broadHighlight ? 0.14 : 0);
   };
 
   const linePenalty = (spot) => {
@@ -297,6 +391,8 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
   const verifyLensCandidate = (spot) => {
     const ring = ringStats(spot, Math.max(6, Math.min(18, Math.round(Math.max(spot.w, spot.h) * 0.35))));
     const radial = radialStats(spot);
+    const flashDelta = flashDeltaStats(spot);
+    const symmetryScore = radialSymmetryScore(spot);
     const localContrast = Math.abs(spot.mean - ring.mean);
     const diameter = Math.max(spot.w, spot.h);
     const minDiameter = liveMode ? 3 : 4;
@@ -307,17 +403,42 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
     const darkCoreScore = spot.kind === "dark" ? clamp01((ring.mean - spot.mean + 18) / 85) : nearestEvidence(spot, ["dark"]) * 0.42;
     const companionScore =
       spot.kind === "dark" ? nearestEvidence(spot, ["bright", "glass"]) : nearestEvidence(spot, ["dark", "bright", "glass"]);
-    const artifactPenalty = linePenalty(spot) * 0.22 + repeatedPenalty(spot) * 0.24 + edgePenalty(spot) * 0.2 + clamp01(ring.std / 150) * 0.06;
+    const retroReflectionScore = Math.max(radial.compactHighlight, flashDelta.score);
+    const artifactPenalty =
+      linePenalty(spot) * 0.24 +
+      repeatedPenalty(spot) * 0.26 +
+      edgePenalty(spot) * 0.22 +
+      glarePenalty(spot, radial) +
+      clamp01(ring.std / 150) * 0.06;
+
+    const evidenceFlags = [
+      spot.shape >= 0.54,
+      symmetryScore >= 0.5,
+      contrastScore >= 0.38,
+      retroReflectionScore >= 0.34,
+      darkCoreScore >= 0.28,
+      companionScore >= 0.26
+    ];
+    const evidenceCount = evidenceFlags.filter(Boolean).length;
+    const strongOpticalEvidence =
+      (retroReflectionScore >= 0.62 && spot.shape >= 0.48) ||
+      (darkCoreScore >= 0.52 && contrastScore >= 0.42) ||
+      (companionScore >= 0.46 && contrastScore >= 0.38);
+    const requiredEvidence = sensitivity === "high" ? 2 : 3;
+    const crossCheckPenalty = evidenceCount >= requiredEvidence || strongOpticalEvidence ? 0 : 0.16 + (requiredEvidence - evidenceCount) * 0.08;
 
     const score =
-      0.2 +
-      spot.shape * 0.25 +
+      0.14 +
+      spot.shape * 0.18 +
+      symmetryScore * 0.1 +
       sizeScore * 0.12 +
-      contrastScore * 0.18 +
+      contrastScore * 0.16 +
       highlightScore * 0.12 +
       darkCoreScore * 0.12 +
-      companionScore * 0.12 -
-      artifactPenalty;
+      companionScore * 0.1 +
+      retroReflectionScore * 0.12 -
+      artifactPenalty -
+      crossCheckPenalty;
 
     let type = "렌즈 후보";
     let reason = "원형 형태와 주변 대비가 렌즈 패턴과 유사함";
@@ -326,7 +447,7 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
       reason = companionScore > 0.22 ? "어두운 코어와 가까운 반사/유리면 후보가 함께 확인됨" : "주변보다 어두운 원형 렌즈 후보";
     } else if (spot.kind === "bright") {
       type = "렌즈 반사 의심";
-      reason = "강한 반사와 원형 렌즈 표면 후보";
+      reason = flashDelta.score > 0.28 ? "프레임 간 밝기 증분이 큰 원형 반사 후보" : "강한 반사와 원형 렌즈 표면 후보";
     } else if (spot.kind === "glass") {
       type = "렌즈 표면 의심";
       reason = "빛을 받은 유리면/코팅 반사 후보";
@@ -336,13 +457,23 @@ export function detectSuspiciousSpots(ctx2d, w, h, options = {}) {
       ...spot,
       ...riskCandidate(score),
       type,
-      reason
+      reason,
+      evidence: {
+        shape: Math.round(spot.shape * 100),
+        symmetry: Math.round(symmetryScore * 100),
+        contrast: Math.round(contrastScore * 100),
+        retroReflection: Math.round(retroReflectionScore * 100),
+        darkCore: Math.round(darkCoreScore * 100),
+        companion: Math.round(companionScore * 100),
+        crossChecks: evidenceCount
+      },
+      crossChecks: evidenceCount
     };
   };
 
   const verified = rawSpots
     .map(verifyLensCandidate)
-    .filter((spot) => spot.score >= threshold.fallbackScore)
+    .filter((spot) => spot.score >= threshold.fallbackScore && (spot.crossChecks >= (sensitivity === "high" ? 2 : 3) || spot.evidence.retroReflection >= 62))
     .sort((a, b) => b.score - a.score);
 
   const merged = [];

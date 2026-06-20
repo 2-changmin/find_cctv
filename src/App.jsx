@@ -32,6 +32,12 @@ function formatRiskSummary(boxes) {
   return `${top.risk} · ${top.confidence}%`;
 }
 
+function riskFromConfidence(confidence) {
+  if (confidence >= 78) return "높음";
+  if (confidence >= 62) return "주의";
+  return "낮음";
+}
+
 export default function App() {
   const previewCanvasRef = useRef(null);
   const videoRef = useRef(null);
@@ -43,6 +49,10 @@ export default function App() {
   const videoTrackRef = useRef(null);
   const scanTickRef = useRef(null);
   const scanHistoryRef = useRef([]);
+  const scanFrameRef = useRef(null);
+  const flashPairRef = useRef({ phase: "captureOff", offFrame: null });
+  const scanBusyRef = useRef(false);
+  const liveBoxesRef = useRef([]);
 
   const [tab, setTab] = useState(TABS.home);
   const [boxes, setBoxes] = useState([]);
@@ -50,6 +60,7 @@ export default function App() {
   const [cameraOn, setCameraOn] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [scanMode, setScanMode] = useState("대기");
   const [hasImage, setHasImage] = useState(false);
   const [sensitivity, setSensitivity] = useState("normal");
   const [minConfidence, setMinConfidence] = useState(40);
@@ -116,6 +127,10 @@ export default function App() {
 
   const summary = useMemo(() => formatRiskSummary(boxes), [boxes]);
   const liveSummary = useMemo(() => formatRiskSummary(liveBoxes), [liveBoxes]);
+
+  useEffect(() => {
+    liveBoxesRef.current = liveBoxes;
+  }, [liveBoxes]);
 
   const drawBaseImage = () => {
     const canvas = previewCanvasRef.current;
@@ -247,12 +262,21 @@ export default function App() {
       videoTrackRef.current = stream.getVideoTracks()[0] || null;
       const capabilities =
         typeof videoTrackRef.current?.getCapabilities === "function" ? videoTrackRef.current.getCapabilities() : {};
-      setFlashEnabled(Boolean(capabilities.torch));
+      const supportsTorch = Boolean(capabilities.torch);
+      setFlashEnabled(supportsTorch);
+      if (supportsTorch) {
+        await setTorch(videoTrackRef.current, false);
+      }
       setCameraOn(true);
       setLiveBoxes([]);
       scanHistoryRef.current = [];
+      scanFrameRef.current = null;
+      flashPairRef.current = { phase: "captureOff", offFrame: null };
+      scanBusyRef.current = false;
+      setTorchOn(false);
+      setScanMode(supportsTorch ? "자동 플래시 차분" : "연속 프레임 차분");
       setShowSettingsButton(false);
-      setStatus("실시간 렌즈 반사 확인을 시작했습니다.");
+      setStatus(supportsTorch ? "자동 플래시 OFF/ON 차분 스캔을 시작했습니다." : "플래시 제어가 없어 연속 프레임 차분으로 스캔합니다.");
     } catch {
       setShowSettingsButton(true);
       setStatus("카메라 권한을 허용해야 실시간 스캔을 사용할 수 있습니다. 설정으로 이동하세요.");
@@ -263,6 +287,9 @@ export default function App() {
     if (scanTickRef.current) clearInterval(scanTickRef.current);
     scanTickRef.current = null;
     scanHistoryRef.current = [];
+    scanFrameRef.current = null;
+    flashPairRef.current = { phase: "captureOff", offFrame: null };
+    scanBusyRef.current = false;
     if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -274,6 +301,7 @@ export default function App() {
     setCameraOn(false);
     setFlashEnabled(false);
     setTorchOn(false);
+    setScanMode("대기");
   };
 
   const openSettings = async () => {
@@ -282,19 +310,6 @@ export default function App() {
       setStatus("설정 화면을 열었습니다. 거기에서 권한을 허용해주세요.");
     } else {
       setStatus("설정 화면을 열 수 없습니다. 앱 설정으로 이동하여 권한을 허용해주세요.");
-    }
-  };
-
-  const toggleFlash = async () => {
-    const track = videoTrackRef.current;
-    if (!track) return;
-    try {
-      const next = !torchOn;
-      await setTorch(track, next);
-      setTorchOn(next);
-    } catch {
-      setFlashEnabled(false);
-      setStatus("현재 기기 또는 iOS WebView에서 플래시 제어를 지원하지 않습니다.");
     }
   };
 
@@ -376,6 +391,8 @@ export default function App() {
           match.sumY += box.y;
           match.sumW += box.w;
           match.sumH += box.h;
+          match.cx = match.sumX / match.count + match.sumW / match.count / 2;
+          match.cy = match.sumY / match.count + match.sumH / match.count / 2;
           match.framesSeen.add(frameIndex);
           match.sumConfidence += box.confidence ?? 0;
           if ((box.confidence ?? 0) > (match.bestConfidence ?? 0)) {
@@ -405,21 +422,34 @@ export default function App() {
     const minFrameCount = Math.max(2, Math.ceil(frames.length * 0.45));
     return clusters
       .filter((cluster) => cluster.framesSeen.size >= minFrameCount)
-      .map((cluster) => ({
-        x: Math.round(cluster.sumX / cluster.count),
-        y: Math.round(cluster.sumY / cluster.count),
-        w: Math.round(cluster.sumW / cluster.count),
-        h: Math.round(cluster.sumH / cluster.count),
-        risk: cluster.best.risk,
-        confidence: Math.round(cluster.best.confidence),
-        type: cluster.best.type
-      }));
+      .map((cluster) => {
+        const persistence = cluster.framesSeen.size / frames.length;
+        const averageConfidence = cluster.sumConfidence / Math.max(1, cluster.count);
+        const confidence = Math.round(Math.min(99, cluster.bestConfidence * 0.72 + averageConfidence * 0.18 + persistence * 10));
+        return {
+          x: Math.round(cluster.sumX / cluster.count),
+          y: Math.round(cluster.sumY / cluster.count),
+          w: Math.round(cluster.sumW / cluster.count),
+          h: Math.round(cluster.sumH / cluster.count),
+          risk: riskFromConfidence(confidence),
+          confidence,
+          type: cluster.best.type,
+          reason: cluster.best.reason,
+          evidence: {
+            ...(cluster.best.evidence || {}),
+            persistence: Math.round(persistence * 100)
+          }
+        };
+      })
+      .sort((a, b) => b.confidence - a.confidence);
   };
 
   useEffect(() => {
     if (!cameraOn) return undefined;
-    scanTickRef.current = setInterval(() => {
+    scanTickRef.current = setInterval(async () => {
+      if (scanBusyRef.current) return;
       if (!videoRef.current?.videoWidth || !overlayRef.current) return;
+      scanBusyRef.current = true;
       const video = videoRef.current;
       const overlay = overlayRef.current;
       overlay.width = video.videoWidth;
@@ -432,14 +462,61 @@ export default function App() {
       temp.height = overlay.height;
       const tctx = temp.getContext("2d");
       tctx.drawImage(video, 0, 0, temp.width, temp.height);
-      const nextLiveBoxes = detectSuspiciousSpots(tctx, temp.width, temp.height, {
-        maxResults: 5,
-        sensitivity,
-        minConfidence,
-        liveMode: true
-      });
-      const stableBoxes = mergeScanFrames(nextLiveBoxes);
-      setLiveBoxes(stableBoxes);
+      const frameData = tctx.getImageData(0, 0, temp.width, temp.height);
+
+      let nextLiveBoxes = [];
+      let stableBoxes = liveBoxesRef.current;
+
+      try {
+        const track = videoTrackRef.current;
+        if (flashEnabled && track) {
+          const pair = flashPairRef.current;
+          if (pair.phase === "captureOff") {
+            pair.offFrame = frameData;
+            pair.phase = "captureOn";
+            await setTorch(track, true);
+            setTorchOn(true);
+            setScanMode("기준 프레임 저장");
+            scanBusyRef.current = false;
+            return;
+          }
+
+          nextLiveBoxes = detectSuspiciousSpots(tctx, temp.width, temp.height, {
+            maxResults: 5,
+            sensitivity,
+            minConfidence,
+            liveMode: true,
+            imageData: frameData,
+            previousImageData: pair.offFrame
+          });
+          pair.offFrame = null;
+          pair.phase = "captureOff";
+          await setTorch(track, false);
+          setTorchOn(false);
+          setScanMode("자동 플래시 차분");
+        } else {
+          nextLiveBoxes = detectSuspiciousSpots(tctx, temp.width, temp.height, {
+            maxResults: 5,
+            sensitivity,
+            minConfidence,
+            liveMode: true,
+            imageData: frameData,
+            previousImageData: scanFrameRef.current
+          });
+          scanFrameRef.current = frameData;
+          setScanMode("연속 프레임 차분");
+        }
+
+        stableBoxes = mergeScanFrames(nextLiveBoxes);
+        setLiveBoxes(stableBoxes);
+      } catch {
+        setFlashEnabled(false);
+        setTorchOn(false);
+        flashPairRef.current = { phase: "captureOff", offFrame: null };
+        scanFrameRef.current = frameData;
+        setScanMode("연속 프레임 차분");
+        setStatus("플래시 자동 제어가 실패해 연속 프레임 차분으로 전환했습니다.");
+      }
 
       octx.lineWidth = 3;
       stableBoxes.forEach((b, idx) => {
@@ -451,10 +528,11 @@ export default function App() {
         octx.font = "14px sans-serif";
         octx.fillText(`${idx + 1} ${b.risk}`, b.x + 5, Math.max(15, b.y - 6));
       });
-    }, 500);
+      scanBusyRef.current = false;
+    }, flashEnabled ? 650 : 500);
 
     return () => scanTickRef.current && clearInterval(scanTickRef.current);
-  }, [cameraOn, sensitivity, minConfidence]);
+  }, [cameraOn, sensitivity, minConfidence, flashEnabled]);
 
   useEffect(() => () => stopCamera(), []);
 
@@ -631,8 +709,8 @@ export default function App() {
               <button className="btn btn-outline-secondary" onClick={stopCamera} disabled={!cameraOn}>
                 중지
               </button>
-              <button className="btn btn-warning" onClick={toggleFlash} disabled={!cameraOn || !flashEnabled}>
-                {torchOn ? "끄기" : "플래시"}
+              <button className="btn btn-warning" disabled>
+                {cameraOn && flashEnabled ? (torchOn ? "ON 프레임" : "OFF 프레임") : "플래시 미지원"}
               </button>
               <button className="btn btn-success" onClick={saveLiveCapture} disabled={!cameraOn || liveBoxes.length === 0}>
                 💾 캡처
@@ -646,7 +724,7 @@ export default function App() {
               {showSettingsButton
                 ? status
                 : cameraOn
-                ? `현재 후보 ${liveBoxes.length}개 · 여러 프레임에서 반복 확인된 위치만 표시합니다.`
+                ? `${scanMode} · 현재 후보 ${liveBoxes.length}개 · 반복 확인된 위치만 표시합니다.`
                 : "시작을 누르면 후면 카메라로 확인합니다."}
             </p>
             {showSettingsButton && (
