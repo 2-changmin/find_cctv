@@ -75,3 +75,50 @@ git status
 
 재정규화 후 `git status`가 깨끗하면 실제 소스 변경은 없는 상태입니다.
 
+## APK 빌드 후 Android 폰에 설치하기
+
+앱을 Android 폰에 직접 설치하려면 Flutter/Android Studio 설정을 마친 뒤 APK 파일을 빌드해서 폰으로 옮기면 됩니다.
+
+개발 테스트용 APK 빌드:
+
+```bash
+flutter build apk --debug
+```
+
+배포 확인용 APK 빌드:
+
+```bash
+flutter build apk --release
+```
+
+빌드된 APK 파일 위치:
+
+```text
+build/app/outputs/flutter-apk/app-debug.apk
+build/app/outputs/flutter-apk/app-release.apk
+```
+
+Windows 기준 전체 경로 예시:
+
+```text
+C:\Users\PC\Desktop\find_cctv\find_cctv\build\app\outputs\flutter-apk\app-debug.apk
+C:\Users\PC\Desktop\find_cctv\find_cctv\build\app\outputs\flutter-apk\app-release.apk
+```
+
+폰으로 옮기는 방법:
+
+1. USB 케이블로 Android 폰을 PC에 연결합니다.
+2. 폰 알림창의 USB 옵션에서 `파일 전송` 또는 `MTP`를 선택합니다.
+3. Windows 파일 탐색기에서 폰의 `Download` 폴더를 엽니다.
+4. 빌드된 APK 파일을 `Download` 폴더로 복사합니다.
+5. 폰의 파일 관리자 앱에서 APK 파일을 터치해 설치합니다.
+6. `알 수 없는 앱 설치 허용` 안내가 뜨면 해당 파일 관리자 앱에 설치 권한을 허용합니다.
+
+앱을 수정한 뒤 업데이트하려면 APK를 다시 빌드한 다음 새 APK를 폰으로 다시 옮겨 설치해야 합니다. 같은 PC에서 같은 빌드 방식으로 만든 APK는 보통 기존 앱 위에 업데이트 설치됩니다.
+
+설치가 되지 않을 때 확인할 것:
+
+- 기존에 설치된 SafeLens 앱이 있으면 삭제 후 다시 설치합니다.
+- 테스트 목적이면 `app-release.apk`보다 `app-debug.apk` 설치를 먼저 시도합니다.
+- 폰의 Android 버전이 Android 7.0 이상인지 확인합니다. 이 앱의 최소 SDK는 24입니다.
+- APK를 연 파일 관리자 또는 브라우저에 `알 수 없는 앱 설치` 권한이 허용되어 있는지 확인합니다.
