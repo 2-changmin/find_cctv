@@ -8,7 +8,8 @@ const TABS = {
   home: "home",
   analyze: "analyze",
   scan: "scan",
-  report: "report"
+  report: "report",
+  help: "help"
 };
 
 const TAB_ITEMS = [
@@ -24,6 +25,24 @@ function getCurrentDateTimeValue() {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60000;
   return new Date(now.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function getTimeParts(value) {
+  const base = value ? new Date(value) : new Date();
+  const date = Number.isNaN(base.getTime()) ? new Date() : base;
+  return {
+    hour: String(date.getHours()).padStart(2, "0"),
+    minute: String(date.getMinutes()).padStart(2, "0")
+  };
+}
+
+function setTimePartValue(currentValue, part, value) {
+  const base = currentValue ? new Date(currentValue) : new Date();
+  const date = Number.isNaN(base.getTime()) ? new Date() : base;
+  if (part === "hour") date.setHours(Number(value));
+  if (part === "minute") date.setMinutes(Number(value));
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
 function formatRiskSummary(boxes) {
@@ -127,6 +146,7 @@ export default function App() {
 
   const summary = useMemo(() => formatRiskSummary(boxes), [boxes]);
   const liveSummary = useMemo(() => formatRiskSummary(liveBoxes), [liveBoxes]);
+  const reportTimeParts = useMemo(() => getTimeParts(form.reportTime), [form.reportTime]);
 
   useEffect(() => {
     liveBoxesRef.current = liveBoxes;
@@ -538,7 +558,11 @@ export default function App() {
 
   const buildReport = () => {
     const { boxes: reportBoxes, source } = getActiveReportData();
-    setReportText(buildReportText(form, reportBoxes, { sensitivity, minConfidence, source }));
+    const nextForm = form.reportTime ? form : { ...form, reportTime: getCurrentDateTimeValue() };
+    if (nextForm !== form) {
+      setForm(nextForm);
+    }
+    setReportText(buildReportText(nextForm, reportBoxes, { sensitivity, minConfidence, source }));
   };
 
   const downloadReport = async () => {
@@ -560,10 +584,10 @@ export default function App() {
           <img className="appbar-logo" src="/app-icon.png" alt="SafeLens 아이콘" />
           <div>
             <div className="appbar-title">SafeLens</div>
-            <div className="appbar-subtitle">몰래카메라 의심 위치 탐지 보조</div>
+            <div className="appbar-subtitle">의심 위치 확인 보조</div>
           </div>
         </div>
-        <div className="appbar-chip">{cameraOn ? "Scanning" : "Private"}</div>
+        <div className="appbar-chip">{cameraOn ? "Scan" : "Local"}</div>
       </header>
 
       <main className="screen">
@@ -571,9 +595,8 @@ export default function App() {
           <section className="home-screen">
             <div className="home-hero">
               <img className="home-logo" src="/app-icon.png" alt="" />
-              <div className="home-kicker">Privacy scan assistant</div>
               <h1>SafeLens</h1>
-              <p>의심 공간을 촬영하거나 카메라로 훑어 반사 후보를 빠르게 확인하세요.</p>
+              <p>현장 확인과 신고 준비를 한 화면 흐름으로 정리합니다.</p>
               <div className="hero-stat-row" aria-label="현재 분석 상태">
                 <span>
                   <strong>{boxes.length}</strong>
@@ -586,29 +609,37 @@ export default function App() {
               </div>
             </div>
             <div className="quick-grid">
-              <button className="quick-action primary" onClick={() => setTab(TABS.scan)}>
-                <span className="quick-icon">◉</span>
-                <span>
-                  <b>실시간 스캔</b>
-                  <small>후면 카메라로 렌즈 반사 확인</small>
-                </span>
-                <strong>{liveSummary}</strong>
-              </button>
-              <button className="quick-action" onClick={() => setTab(TABS.analyze)}>
+              <button className="quick-action primary" onClick={() => setTab(TABS.analyze)}>
                 <span className="quick-icon">⌕</span>
                 <span>
                   <b>사진 분석</b>
                   <small>이미지에서 의심 후보 표시</small>
                 </span>
-                <strong>{summary}</strong>
+                <strong>탐지 전 <span aria-hidden="true">›</span></strong>
+              </button>
+              <button className="quick-action" onClick={() => setTab(TABS.scan)}>
+                <span className="quick-icon">◉</span>
+                <span>
+                  <b>실시간 스캔</b>
+                  <small>렌즈 반사 확인</small>
+                </span>
+                <strong>탐지 전 <span aria-hidden="true">›</span></strong>
               </button>
               <button className="quick-action" onClick={() => setTab(TABS.report)}>
                 <span className="quick-icon">!</span>
                 <span>
                   <b>신고 보조</b>
-                  <small>시간, 위치, 결과를 문안으로 정리</small>
+                  <small>문안 생성</small>
                 </span>
-                <strong>문안 생성</strong>
+                <strong>문안 생성 <span aria-hidden="true">›</span></strong>
+              </button>
+              <button className="quick-action" onClick={() => setTab(TABS.help)}>
+                <span className="quick-icon">☞</span>
+                <span>
+                  <b>도움 받기</b>
+                  <small>대처 안내</small>
+                </span>
+                <strong>대처 안내 <span aria-hidden="true">›</span></strong>
               </button>
             </div>
             <div className="notice-band">앱 결과는 확정 판정이 아니라 신고와 현장 확인을 돕는 참고 정보입니다.</div>
@@ -625,52 +656,16 @@ export default function App() {
               <button className="btn btn-primary" onClick={() => libraryInputRef.current?.click()}>
                 사진 선택
               </button>
-              <button className="btn btn-outline-primary" onClick={() => cameraInputRef.current?.click()}>
-                촬영
-              </button>
+              <button className="btn btn-outline-secondary" onClick={resetImage}>초기화</button>
             </div>
+            <button className="btn btn-outline-primary btn-block" onClick={analyzeImage} disabled={!hasImage}>
+              분석
+            </button>
             <input ref={libraryInputRef} className="visually-hidden" type="file" accept="image/*" onChange={onFileChange} />
             <input ref={cameraInputRef} className="visually-hidden" type="file" accept="image/*" capture="environment" onChange={onFileChange} />
-            <div className="form-group">
-              <label htmlFor="sensitivitySelect" className="form-label">탐지 민감도</label>
-              <select
-                id="sensitivitySelect"
-                className="form-select"
-                value={sensitivity}
-                onChange={(event) => setSensitivity(event.target.value)}
-              >
-                <option value="low">낮음 (적은 오탐)</option>
-                <option value="normal">보통</option>
-                <option value="high">높음 (민감)</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label htmlFor="confidenceInput" className="form-label">최소 탐지 신뢰도</label>
-              <input
-                id="confidenceInput"
-                type="number"
-                min="0"
-                max="100"
-                step="5"
-                className="form-control"
-                value={minConfidence}
-                onChange={(event) => setMinConfidence(Number(event.target.value))}
-              />
-              <div className="form-text">이 값보다 낮은 후보는 자동으로 제외합니다.</div>
-            </div>
-            <div className="actions d-flex gap-2">
-              <button className="btn btn-primary" onClick={analyzeImage} disabled={!hasImage}>
-                분석
-              </button>
-              <button className="btn btn-outline-secondary" onClick={resetImage}>
-                초기화
-              </button>
-              <button className="btn btn-success" onClick={saveAnalysisImage} disabled={boxes.length === 0}>
-                💾 저장
-              </button>
-            </div>
             <div className="canvas-wrap">
               <canvas ref={previewCanvasRef} />
+              {!hasImage && <span className="media-placeholder">선택한 이미지가 여기에 표시됩니다.</span>}
             </div>
             <p className="status-text">{status}</p>
             {showSettingsButton && (
@@ -722,7 +717,8 @@ export default function App() {
               <h2 className="section-title">렌즈 반사 확인</h2>
               <span className="risk-pill">{liveSummary}</span>
             </div>
-            <div className="actions d-flex gap-2">
+            <p className="section-desc">플래시 반사 후보를 실시간으로 표시합니다. 표시된 지점은 확정 판정이 아니라 확인용 참고 정보입니다.</p>
+            <div className="actions scan-actions">
               <button className="btn btn-primary" onClick={startCamera} disabled={cameraOn}>
                 시작
               </button>
@@ -730,15 +726,13 @@ export default function App() {
                 중지
               </button>
               <button className="btn btn-warning" disabled>
-                {cameraOn && flashEnabled ? (torchOn ? "ON 프레임" : "OFF 프레임") : "플래시 미지원"}
-              </button>
-              <button className="btn btn-success" onClick={saveLiveCapture} disabled={!cameraOn || liveBoxes.length === 0}>
-                💾 캡처
+                {cameraOn && flashEnabled ? (torchOn ? "ON" : "OFF") : "플래시"}
               </button>
             </div>
             <div className="camera-wrap">
               <video ref={videoRef} autoPlay playsInline muted />
               <canvas ref={overlayRef} id="overlay" />
+              {!cameraOn && <span className="media-placeholder">카메라 시작 후 이곳에서 반사 확인</span>}
             </div>
             <p className="status-text">
               {showSettingsButton
@@ -759,34 +753,49 @@ export default function App() {
           <section className="panel">
             <div className="section-head">
               <h2 className="section-title">신고 보조</h2>
-              <span className="risk-pill">자동 입력</span>
+              <span className="risk-pill">문안 생성</span>
             </div>
-            <div className="actions d-flex gap-2">
-              <button className="btn btn-outline-primary" onClick={fillCurrentTime}>
-                현재 시간
-              </button>
-              <button className="btn btn-outline-primary" onClick={fillCurrentLocation}>
-                현재 위치
-              </button>
+            <div className="time-row">
+              <label className="time-select">
+                <span>발견 시각</span>
+                <select
+                  className="form-select"
+                  value={reportTimeParts.hour}
+                  onChange={(e) => setForm({ ...form, reportTime: setTimePartValue(form.reportTime, "hour", e.target.value) })}
+                >
+                  {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0")).map((hour) => (
+                    <option key={hour} value={hour}>{Number(hour)}</option>
+                  ))}
+                </select>
+                <span>시</span>
+              </label>
+              <label className="time-select">
+                <select
+                  className="form-select"
+                  value={reportTimeParts.minute}
+                  onChange={(e) => setForm({ ...form, reportTime: setTimePartValue(form.reportTime, "minute", e.target.value) })}
+                >
+                  {Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0")).map((minute) => (
+                    <option key={minute} value={minute}>{Number(minute)}</option>
+                  ))}
+                </select>
+                <span>분</span>
+              </label>
             </div>
             {showSettingsButton && (
               <button className="btn btn-link" onClick={openSettings}>
                 설정 열기
               </button>
             )}
-            <p className="status-text">{status}</p>
-            <input
-              className="form-control"
-              type="datetime-local"
-              value={form.reportTime}
-              onChange={(e) => setForm({ ...form, reportTime: e.target.value })}
-            />
             <input
               className="form-control"
               type="text"
-              placeholder="장소"
+              placeholder="현재 위치 또는 장소"
               value={form.reportPlace}
               onChange={(e) => setForm({ ...form, reportPlace: e.target.value })}
+              onFocus={() => {
+                if (!form.reportPlace) fillCurrentLocation();
+              }}
             />
             <textarea
               className="form-control"
@@ -795,18 +804,90 @@ export default function App() {
               value={form.reportDesc}
               onChange={(e) => setForm({ ...form, reportDesc: e.target.value })}
             />
-            <div className="actions d-flex gap-2">
+            <div className="actions report-actions">
               <button className="btn btn-primary" onClick={buildReport}>
                 문안 생성
               </button>
               <button className="btn btn-outline-secondary" onClick={downloadReport}>
                 저장
               </button>
+              <a className="btn btn-outline-secondary" href={`sms:?body=${encodeURIComponent(reportText || "몰래카메라 의심 신고를 요청합니다.")}`}>
+                문자 신고
+              </a>
               <a className="btn btn-danger" href="tel:112">
                 112
               </a>
             </div>
+            <p className="form-text">문안 생성 후 문자 신고 또는 112 전화 신고를 선택할 수 있습니다.</p>
+            <button className="btn btn-outline-secondary btn-block" onClick={() => setTab(TABS.help)}>
+              피해 대처 안내 보기
+            </button>
             <textarea className="form-control" rows="9" readOnly value={reportText} placeholder="신고 문안" />
+          </section>
+        )}
+
+        {tab === TABS.help && (
+          <section className="panel help-panel">
+            <div className="section-head">
+              <h2 className="section-title">도움 받기</h2>
+              <span className="risk-pill">대처 안내</span>
+            </div>
+            <p className="section-desc">불안하거나 피해가 의심될 때 바로 확인할 수 있는 대응 순서입니다.</p>
+            <div className="help-list">
+              <article className="help-card">
+                <span className="help-icon">✱</span>
+                <h3>지금 바로 할 일</h3>
+                <ul>
+                  <li>긴급하거나 위험하면 즉시 112로 신고합니다.</li>
+                  <li>가능하면 안전한 장소로 이동하고 주변에 도움을 요청합니다.</li>
+                  <li>가해자와 직접 대면하거나 혼자 삭제를 요구하지 않습니다.</li>
+                </ul>
+                <div className="help-actions">
+                  <a className="btn btn-outline-danger" href="tel:112">112 전화</a>
+                  <a className="btn btn-outline-secondary" href="tel:1366">1366 전화</a>
+                </div>
+              </article>
+              <article className="help-card">
+                <span className="help-icon">▤</span>
+                <h3>증거 보존</h3>
+                <ul>
+                  <li>게시물 URL, 계정명, 업로드 시각, 캡처 화면을 보관합니다.</li>
+                  <li>가능하면 원본 파일과 화면 녹화도 따로 보관합니다.</li>
+                  <li>신고나 삭제 요청 전 증거가 사라지지 않도록 먼저 정리합니다.</li>
+                  <li>불법촬영물을 불필요하게 재전송하거나 공유하지 않습니다.</li>
+                </ul>
+              </article>
+              <article className="help-card">
+                <span className="help-icon">▥</span>
+                <h3>공공 지원</h3>
+                <ul>
+                  <li>중앙디지털성범죄피해자지원센터에서 상담, 삭제지원, 모니터링, 수사·법률·의료 연계를 받을 수 있습니다.</li>
+                  <li>여성긴급전화 1366은 365일 24시간 초기 상담을 지원합니다.</li>
+                  <li>지역 디지털성범죄피해자지원센터도 상담과 삭제 연계를 제공합니다.</li>
+                </ul>
+                <div className="help-actions">
+                  <a className="btn btn-outline-secondary" href="https://d4u.stop.or.kr" target="_blank" rel="noreferrer">센터 열기</a>
+                  <a className="btn btn-outline-secondary" href="tel:1366">지역 센터</a>
+                </div>
+              </article>
+              <article className="help-card">
+                <span className="help-icon">▦</span>
+                <h3>삭제 지원</h3>
+                <ul>
+                  <li>우선 공공기관의 삭제지원과 모니터링을 확인합니다.</li>
+                  <li>민간 삭제 대행 서비스는 비용, 환불 조건, 삭제 가능 범위, 개인정보 제공 범위를 확인해야 합니다.</li>
+                  <li>앱에서는 이런 서비스를 디지털 장의사 또는 온라인 게시물 삭제 대행으로 안내할 수 있습니다.</li>
+                </ul>
+              </article>
+              <article className="help-card">
+                <span className="help-icon">♡</span>
+                <h3>법률·심리 지원</h3>
+                <ul>
+                  <li>수사 진행, 법률 상담, 의료 지원, 심리 상담을 함께 요청할 수 있습니다.</li>
+                  <li>혼자 판단하기 어렵다면 상담기관을 통해 필요한 기관으로 연계받는 방식이 안전합니다.</li>
+                </ul>
+              </article>
+            </div>
           </section>
         )}
       </main>
