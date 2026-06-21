@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -22,6 +22,11 @@ class SuspiciousBox {
     required this.w,
     required this.h,
     required this.score,
+    required this.confidence,
+    required this.risk,
+    required this.type,
+    required this.reason,
+    this.evidence = const {},
   });
 
   final int x;
@@ -29,120 +34,807 @@ class SuspiciousBox {
   final int w;
   final int h;
   final double score;
+  final int confidence;
+  final String risk;
+  final String type;
+  final String reason;
+  final Map<String, int> evidence;
+
+  SuspiciousBox copyWith({
+    int? x,
+    int? y,
+    int? w,
+    int? h,
+    double? score,
+    int? confidence,
+    String? risk,
+    String? type,
+    String? reason,
+    Map<String, int>? evidence,
+  }) {
+    return SuspiciousBox(
+      x: x ?? this.x,
+      y: y ?? this.y,
+      w: w ?? this.w,
+      h: h ?? this.h,
+      score: score ?? this.score,
+      confidence: confidence ?? this.confidence,
+      risk: risk ?? this.risk,
+      type: type ?? this.type,
+      reason: reason ?? this.reason,
+      evidence: evidence ?? this.evidence,
+    );
+  }
 }
 
-List<SuspiciousBox> detectSuspiciousSpots(img.Image source) {
+double _clamp01(double value) => math.max(0, math.min(1, value)).toDouble();
+
+String _riskFromScore(double score) {
+  if (score >= 0.78) return '높음';
+  if (score >= 0.62) return '주의';
+  return '낮음';
+}
+
+double _colorSaturation(num r, num g, num b) {
+  final maxValue = math.max(r, math.max(g, b)).toDouble();
+  final minValue = math.min(r, math.min(g, b)).toDouble();
+  if (maxValue == 0) return 0;
+  return (maxValue - minValue) / maxValue;
+}
+
+double _aspectScore(int w, int h) {
+  final aspect = w > h ? w / math.max(1, h) : h / math.max(1, w);
+  return _clamp01((2.1 - aspect) / 1.1);
+}
+
+double _fillScore(double fill) {
+  if (fill < 0.12) return 0;
+  if (fill > 0.92) return 0.75;
+  return _clamp01((fill - 0.12) / 0.48);
+}
+
+class _DetectorConfig {
+  const _DetectorConfig({
+    required this.local,
+    required this.darkDelta,
+    required this.brightDelta,
+    required this.minScore,
+    required this.fallbackScore,
+    required this.maxOut,
+  });
+
+  final int local;
+  final int darkDelta;
+  final int brightDelta;
+  final double minScore;
+  final double fallbackScore;
+  final int maxOut;
+
+  _DetectorConfig live() {
+    return _DetectorConfig(
+      local: math.max(16, local - 4),
+      darkDelta: math.max(12, darkDelta - 6),
+      brightDelta: math.max(16, brightDelta - 8),
+      minScore: minScore - 0.04,
+      fallbackScore: fallbackScore - 0.04,
+      maxOut: maxOut,
+    );
+  }
+}
+
+class _BoxStats {
+  const _BoxStats({required this.mean, required this.std, required this.area});
+
+  final double mean;
+  final double std;
+  final int area;
+}
+
+class _RingStats {
+  const _RingStats({required this.mean, required this.std});
+
+  final double mean;
+  final double std;
+}
+
+class _RadialStats {
+  const _RadialStats({
+    required this.center,
+    required this.ring,
+    required this.contrast,
+    required this.brightRatio,
+    required this.compactHighlight,
+  });
+
+  final double center;
+  final double ring;
+  final double contrast;
+  final double brightRatio;
+  final double compactHighlight;
+}
+
+class _FlashDeltaStats {
+  const _FlashDeltaStats(
+      {required this.score,
+      required this.mean,
+      required this.peak,
+      required this.hotRatio});
+
+  final double score;
+  final double mean;
+  final double peak;
+  final double hotRatio;
+}
+
+class _Spot {
+  _Spot({
+    required this.x,
+    required this.y,
+    required this.w,
+    required this.h,
+    required this.x1,
+    required this.y1,
+    required this.cx,
+    required this.cy,
+    required this.count,
+    required this.area,
+    required this.fill,
+    required this.mean,
+    required this.sat,
+    required this.kind,
+    required this.shape,
+  });
+
+  final int x;
+  final int y;
+  final int w;
+  final int h;
+  final int x1;
+  final int y1;
+  final double cx;
+  final double cy;
+  final int count;
+  final int area;
+  final double fill;
+  final double mean;
+  final double sat;
+  final String kind;
+  final double shape;
+}
+
+class _ScanCluster {
+  _ScanCluster(SuspiciousBox box, int frameIndex)
+      : cx = box.x + box.w / 2,
+        cy = box.y + box.h / 2,
+        count = 1,
+        sumX = box.x,
+        sumY = box.y,
+        sumW = box.w,
+        sumH = box.h,
+        w = box.w,
+        h = box.h,
+        best = box,
+        bestConfidence = box.confidence,
+        sumConfidence = box.confidence,
+        framesSeen = {frameIndex};
+
+  double cx;
+  double cy;
+  int count;
+  int sumX;
+  int sumY;
+  int sumW;
+  int sumH;
+  int w;
+  int h;
+  SuspiciousBox best;
+  int bestConfidence;
+  int sumConfidence;
+  final Set<int> framesSeen;
+
+  void add(SuspiciousBox box, int frameIndex) {
+    count += 1;
+    sumX += box.x;
+    sumY += box.y;
+    sumW += box.w;
+    sumH += box.h;
+    cx = sumX / count + sumW / count / 2;
+    cy = sumY / count + sumH / count / 2;
+    framesSeen.add(frameIndex);
+    sumConfidence += box.confidence;
+    if (box.confidence > bestConfidence) {
+      best = box;
+      bestConfidence = box.confidence;
+    }
+  }
+}
+
+List<SuspiciousBox> detectSuspiciousSpots(
+  img.Image source, {
+  int maxResults = 8,
+  int minConfidence = 0,
+  bool liveMode = false,
+  String sensitivity = 'normal',
+  img.Image? previousImage,
+}) {
   final width = source.width;
   final height = source.height;
   final total = width * height;
-  final bright = Uint8List(total);
-  final dark = Uint8List(total);
-  final visitedBright = Uint8List(total);
-  final visitedDark = Uint8List(total);
   final lum = Float32List(total);
+  final sat = Float32List(total);
+  final previousMatches = previousImage != null &&
+      previousImage.width == width &&
+      previousImage.height == height;
+  final positiveDiff = previousMatches ? Float32List(total) : null;
+  var globalDeltaSum = 0.0;
 
-  for (var y = 0; y < height; y += 1) {
-    for (var x = 0; x < width; x += 1) {
-      final pixel = source.getPixel(x, y);
-      final value = (pixel.r + pixel.g + pixel.b) / 3;
-      final index = y * width + x;
-      lum[index] = value.toDouble();
-      if (value >= 242) bright[index] = 1;
-      if (value <= 42) dark[index] = 1;
+  for (var i = 0; i < total; i += 1) {
+    final x = i % width;
+    final y = i ~/ width;
+    final pixel = source.getPixel(x, y);
+    final r = pixel.r;
+    final g = pixel.g;
+    final b = pixel.b;
+    final value = r * 0.299 + g * 0.587 + b * 0.114;
+    lum[i] = value.toDouble();
+    sat[i] = _colorSaturation(r, g, b);
+
+    if (positiveDiff != null) {
+      final previous = previousImage!.getPixel(x, y);
+      final previousLum =
+          previous.r * 0.299 + previous.g * 0.587 + previous.b * 0.114;
+      final delta = value - previousLum;
+      positiveDiff[i] = delta.toDouble();
+      globalDeltaSum += delta;
     }
   }
 
-  final boxes = <String, SuspiciousBox>{};
-  final directions = [-1, 1, -width, width];
+  if (positiveDiff != null) {
+    final globalDelta = globalDeltaSum / math.max(1, total);
+    for (var i = 0; i < total; i += 1) {
+      final normalized = positiveDiff[i] - globalDelta;
+      positiveDiff[i] = normalized > 6 ? normalized : 0;
+    }
+  }
 
-  double getRingContrast(int x0, int y0, int x1, int y1, double objectMean) {
-    var ringSum = 0.0;
-    var ringCount = 0;
-    for (var y = math.max(0, y0 - 2); y <= math.min(height - 1, y1 + 2); y += 1) {
-      for (var x = math.max(0, x0 - 2); x <= math.min(width - 1, x1 + 2); x += 1) {
-        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) continue;
-        ringSum += lum[y * width + x];
-        ringCount += 1;
+  final baseConfig = switch (sensitivity) {
+    'low' => const _DetectorConfig(
+        local: 30,
+        darkDelta: 34,
+        brightDelta: 42,
+        minScore: 0.66,
+        fallbackScore: 0.6,
+        maxOut: 3,
+      ),
+    'high' => const _DetectorConfig(
+        local: 22,
+        darkDelta: 16,
+        brightDelta: 22,
+        minScore: 0.5,
+        fallbackScore: 0.44,
+        maxOut: 5,
+      ),
+    _ => const _DetectorConfig(
+        local: 26,
+        darkDelta: 24,
+        brightDelta: 30,
+        minScore: 0.58,
+        fallbackScore: 0.52,
+        maxOut: 4,
+      ),
+  };
+  final threshold = liveMode ? baseConfig.live() : baseConfig;
+
+  final integral = Float64List((width + 1) * (height + 1));
+  final integralSq = Float64List((width + 1) * (height + 1));
+  for (var y = 0; y < height; y += 1) {
+    var row = 0.0;
+    var rowSq = 0.0;
+    for (var x = 0; x < width; x += 1) {
+      final value = lum[y * width + x];
+      row += value;
+      rowSq += value * value;
+      final dst = (y + 1) * (width + 1) + x + 1;
+      integral[dst] = integral[y * (width + 1) + x + 1] + row;
+      integralSq[dst] = integralSq[y * (width + 1) + x + 1] + rowSq;
+    }
+  }
+
+  _BoxStats boxStats(num x0, num y0, num x1, num y1) {
+    final ax = math.max(0, math.min(width - 1, x0.floor()));
+    final ay = math.max(0, math.min(height - 1, y0.floor()));
+    final bx = math.max(0, math.min(width - 1, x1.ceil()));
+    final by = math.max(0, math.min(height - 1, y1.ceil()));
+    final stride = width + 1;
+    final area = math.max(1, (bx - ax + 1) * (by - ay + 1));
+    final sum = integral[(by + 1) * stride + bx + 1] -
+        integral[ay * stride + bx + 1] -
+        integral[(by + 1) * stride + ax] +
+        integral[ay * stride + ax];
+    final sumSq = integralSq[(by + 1) * stride + bx + 1] -
+        integralSq[ay * stride + bx + 1] -
+        integralSq[(by + 1) * stride + ax] +
+        integralSq[ay * stride + ax];
+    final mean = sum / area;
+    return _BoxStats(
+        mean: mean,
+        std: math.sqrt(math.max(0, sumSq / area - mean * mean)),
+        area: area);
+  }
+
+  double localMean(int x, int y, int radius) =>
+      boxStats(x - radius, y - radius, x + radius, y + radius).mean;
+
+  final darkMask = Uint8List(total);
+  final brightMask = Uint8List(total);
+  final glassMask = Uint8List(total);
+  final localRadius = math.max(14,
+      math.min(liveMode ? 26 : 48, (math.min(width, height) * 0.04).round()));
+
+  for (var i = 0; i < total; i += 1) {
+    final x = i % width;
+    final y = i ~/ width;
+    final value = lum[i];
+    final mean = localMean(x, y, localRadius);
+    final darkDelta = mean - value;
+    final brightDelta = value - mean;
+
+    if (value <= 72 || (value <= 150 && darkDelta >= threshold.darkDelta)) {
+      darkMask[i] = 1;
+    }
+    if (value >= 232 ||
+        (value >= 175 &&
+            brightDelta >= threshold.brightDelta &&
+            sat[i] < 0.62)) {
+      brightMask[i] = 1;
+    }
+    if (value >= 115 &&
+        value <= 245 &&
+        brightDelta.abs() >= threshold.brightDelta * 0.55 &&
+        sat[i] < 0.82) {
+      glassMask[i] = 1;
+    }
+  }
+
+  _Spot? walk(int start, Uint8List mask, Uint8List visited, String kind) {
+    final queue = <int>[start];
+    visited[start] = 1;
+    var minX = width;
+    var minY = height;
+    var maxX = 0;
+    var maxY = 0;
+    var count = 0;
+    var sum = 0.0;
+    var satSum = 0.0;
+
+    while (queue.isNotEmpty) {
+      final cur = queue.removeLast();
+      final x = cur % width;
+      final y = cur ~/ width;
+      minX = math.min(minX, x);
+      minY = math.min(minY, y);
+      maxX = math.max(maxX, x);
+      maxY = math.max(maxY, y);
+      count += 1;
+      sum += lum[cur];
+      satSum += sat[cur];
+
+      for (final next in [cur - 1, cur + 1, cur - width, cur + width]) {
+        if (next < 0 || next >= total) continue;
+        if (((next % width) - x).abs() > 1) continue;
+        if (mask[next] == 0 || visited[next] == 1) continue;
+        visited[next] = 1;
+        queue.add(next);
       }
     }
-    if (ringCount == 0) return 0;
-    return objectMean - ringSum / ringCount;
+
+    final spotWidth = maxX - minX + 1;
+    final spotHeight = maxY - minY + 1;
+    final area = spotWidth * spotHeight;
+    final fill = count / math.max(1, area);
+    final shape =
+        _aspectScore(spotWidth, spotHeight) * 0.72 + _fillScore(fill) * 0.28;
+    if (count < 3 || fill < 0.08 || shape < 0.24) return null;
+
+    return _Spot(
+      x: minX,
+      y: minY,
+      w: spotWidth,
+      h: spotHeight,
+      x1: maxX,
+      y1: maxY,
+      cx: minX + spotWidth / 2,
+      cy: minY + spotHeight / 2,
+      count: count,
+      area: area,
+      fill: fill,
+      mean: sum / math.max(1, count),
+      sat: satSum / math.max(1, count),
+      kind: kind,
+      shape: shape,
+    );
   }
 
-  void addCandidate(int x, int y, int boxWidth, int boxHeight, double score) {
-    final key = '${(x / 8).round()}-${(y / 8).round()}';
-    final previous = boxes[key];
-    if (previous == null || previous.score < score) {
-      boxes[key] = SuspiciousBox(x: x, y: y, w: boxWidth, h: boxHeight, score: score);
-    }
-  }
+  List<_Spot> collectSpots(Uint8List mask, String kind) {
+    final visited = Uint8List(total);
+    final spots = <_Spot>[];
+    final maxSide = liveMode ? 86 : 132;
+    final maxArea = liveMode ? 3200 : 7200;
 
-  double circularityPenalty(int boxWidth, int boxHeight) {
-    final aspect = boxWidth > boxHeight
-        ? boxWidth / math.max(1, boxHeight)
-        : boxHeight / math.max(1, boxWidth);
-    return math.max(0, aspect - 1.8) * 0.25;
-  }
-
-  void visitComponents(Uint8List mask, Uint8List visited, bool isBright) {
     for (var i = 0; i < total; i += 1) {
       if (mask[i] == 0 || visited[i] == 1) continue;
-      final queue = <int>[i];
-      visited[i] = 1;
-      var minX = width;
-      var minY = height;
-      var maxX = 0;
-      var maxY = 0;
-      var count = 0;
-      var sumL = 0.0;
+      final spot = walk(i, mask, visited, kind);
+      if (spot == null) continue;
+      if (spot.w > maxSide || spot.h > maxSide || spot.area > maxArea) continue;
+      spots.add(spot);
+    }
+    return spots;
+  }
 
-      while (queue.isNotEmpty) {
-        final current = queue.removeLast();
-        final x = current % width;
-        final y = current ~/ width;
-        minX = math.min(minX, x);
-        minY = math.min(minY, y);
-        maxX = math.max(maxX, x);
-        maxY = math.max(maxY, y);
+  final rawSpots = <_Spot>[
+    ...collectSpots(darkMask, 'dark'),
+    ...collectSpots(brightMask, 'bright'),
+    ...collectSpots(glassMask, 'glass'),
+  ];
+
+  _RingStats ringStats(_Spot spot, [int pad = 8]) {
+    final outer =
+        boxStats(spot.x - pad, spot.y - pad, spot.x1 + pad, spot.y1 + pad);
+    final inner = boxStats(spot.x, spot.y, spot.x1, spot.y1);
+    final ringArea = math.max(1, outer.area - inner.area);
+    final ringMean =
+        (outer.mean * outer.area - inner.mean * inner.area) / ringArea;
+    return _RingStats(mean: ringMean, std: outer.std);
+  }
+
+  _RadialStats radialStats(_Spot spot) {
+    final radius = math
+        .max(4, math.min(liveMode ? 38 : 62, math.max(spot.w, spot.h) / 2))
+        .toDouble();
+    var innerSum = 0.0;
+    var innerCount = 0;
+    var ringSum = 0.0;
+    var ringCount = 0;
+    var brightCount = 0;
+    var coreBrightCount = 0;
+    var outerBrightCount = 0;
+    final outer = (radius * 1.85).ceil();
+
+    for (var y = math.max(0, (spot.cy - outer).floor());
+        y <= math.min(height - 1, (spot.cy + outer).ceil());
+        y += 1) {
+      for (var x = math.max(0, (spot.cx - outer).floor());
+          x <= math.min(width - 1, (spot.cx + outer).ceil());
+          x += 1) {
+        final dist =
+            math.sqrt(math.pow(x - spot.cx, 2) + math.pow(y - spot.cy, 2));
+        final value = lum[y * width + x];
+        if (dist <= radius * 0.55) {
+          innerSum += value;
+          innerCount += 1;
+          if (value >= 218) coreBrightCount += 1;
+        } else if (dist <= radius * 1.85) {
+          ringSum += value;
+          ringCount += 1;
+          if (value >= 218) outerBrightCount += 1;
+        }
+        if (dist <= radius * 1.85 && value >= 210) brightCount += 1;
+      }
+    }
+
+    final coreBrightRatio = innerCount > 0 ? coreBrightCount / innerCount : 0.0;
+    final outerBrightRatio = ringCount > 0 ? outerBrightCount / ringCount : 0.0;
+    final center = innerCount > 0 ? innerSum / innerCount : spot.mean;
+    final ring = ringCount > 0 ? ringSum / ringCount : spot.mean;
+    return _RadialStats(
+      center: center,
+      ring: ring,
+      contrast: (ring - center).abs(),
+      brightRatio: innerCount + ringCount > 0
+          ? brightCount / (innerCount + ringCount)
+          : 0,
+      compactHighlight:
+          _clamp01((coreBrightRatio - outerBrightRatio + 0.03) / 0.18),
+    );
+  }
+
+  _FlashDeltaStats flashDeltaStats(_Spot spot) {
+    if (positiveDiff == null) {
+      return const _FlashDeltaStats(score: 0, mean: 0, peak: 0, hotRatio: 0);
+    }
+    final radius = math
+        .max(4, math.min(liveMode ? 42 : 64, math.max(spot.w, spot.h) * 0.85))
+        .toDouble();
+    var sum = 0.0;
+    var count = 0;
+    var hot = 0;
+    var peak = 0.0;
+
+    for (var y = math.max(0, (spot.cy - radius).floor());
+        y <= math.min(height - 1, (spot.cy + radius).ceil());
+        y += 1) {
+      for (var x = math.max(0, (spot.cx - radius).floor());
+          x <= math.min(width - 1, (spot.cx + radius).ceil());
+          x += 1) {
+        final dist =
+            math.sqrt(math.pow(x - spot.cx, 2) + math.pow(y - spot.cy, 2));
+        if (dist > radius) continue;
+        final delta = positiveDiff[y * width + x];
+        sum += delta;
         count += 1;
-        sumL += lum[current];
-
-        for (final direction in directions) {
-          final next = current + direction;
-          if (next < 0 || next >= total) continue;
-          if (((next % width) - x).abs() > 1) continue;
-          if (mask[next] == 1 && visited[next] == 0) {
-            visited[next] = 1;
-            queue.add(next);
-          }
-        }
+        if (delta >= 24) hot += 1;
+        peak = math.max(peak, delta);
       }
+    }
 
-      final boxWidth = maxX - minX + 1;
-      final boxHeight = maxY - minY + 1;
-      final area = boxWidth * boxHeight;
-      final meanL = sumL / count;
-      final contrast = getRingContrast(minX, minY, maxX, maxY, meanL);
+    final mean = count > 0 ? sum / count : 0.0;
+    final hotRatio = count > 0 ? hot / count : 0.0;
+    return _FlashDeltaStats(
+      mean: mean,
+      peak: peak,
+      hotRatio: hotRatio,
+      score: _clamp01(mean / 28) * 0.45 +
+          _clamp01(peak / 70) * 0.35 +
+          _clamp01(hotRatio / 0.16) * 0.2,
+    );
+  }
 
-      if (isBright) {
-        if (count >= 4 && area <= 220 && boxWidth <= 22 && boxHeight <= 22 && contrast > 20) {
-          final score = 0.5 + math.min(0.35, contrast / 110) - circularityPenalty(boxWidth, boxHeight);
-          if (score >= 0.52) addCandidate(minX, minY, boxWidth, boxHeight, score);
-        }
-      } else {
-        final ringContrast = contrast * -1;
-        if (count >= 8 && area <= 340 && boxWidth <= 30 && boxHeight <= 30 && ringContrast > 24) {
-          final score = 0.47 + math.min(0.35, ringContrast / 120) - circularityPenalty(boxWidth, boxHeight);
-          if (score >= 0.5) addCandidate(minX, minY, boxWidth, boxHeight, score);
-        }
+  double sampleLum(num x, num y) {
+    final sx = math.max(0, math.min(width - 1, x.round()));
+    final sy = math.max(0, math.min(height - 1, y.round()));
+    return lum[sy * width + sx];
+  }
+
+  double radialSymmetryScore(_Spot spot) {
+    final radius = math
+        .max(4, math.min(liveMode ? 36 : 58, math.max(spot.w, spot.h) * 0.58))
+        .toDouble();
+    final samples = <double>[];
+    const pairs = 12;
+    for (var i = 0; i < pairs; i += 1) {
+      final angle = math.pi * 2 * i / pairs;
+      samples.add(sampleLum(spot.cx + math.cos(angle) * radius,
+          spot.cy + math.sin(angle) * radius));
+    }
+    final mean = samples.reduce((acc, value) => acc + value) / samples.length;
+    final variance = samples.reduce(
+            (acc, value) => acc + math.pow(value - mean, 2).toDouble()) /
+        samples.length;
+    final std = math.sqrt(variance);
+    var pairDiff = 0.0;
+    for (var i = 0; i < pairs ~/ 2; i += 1) {
+      pairDiff += (samples[i] - samples[i + pairs ~/ 2]).abs();
+    }
+    final oppositeScore = _clamp01(1 - pairDiff / (pairs * 24));
+    final evennessScore = _clamp01(1 - std / 46);
+    return evennessScore * 0.58 + oppositeScore * 0.42;
+  }
+
+  double glarePenalty(_Spot spot, _RadialStats radial) {
+    final diameter = math.max(spot.w, spot.h);
+    final largeBrightPatch = spot.kind != 'dark' &&
+        diameter > (liveMode ? 34 : 48) &&
+        spot.fill > 0.58;
+    final broadHighlight = radial.brightRatio > 0.34;
+    return (largeBrightPatch ? 0.18 : 0) + (broadHighlight ? 0.14 : 0);
+  }
+
+  double linePenalty(_Spot spot) {
+    const pad = 6;
+    final x0 = math.max(0, spot.x - pad);
+    final y0 = math.max(0, spot.y - pad);
+    final x1 = math.min(width - 1, spot.x1 + pad);
+    final y1 = math.min(height - 1, spot.y1 + pad);
+    var strongRows = 0;
+    var strongCols = 0;
+
+    for (var y = y0; y <= y1; y += 1) {
+      var hits = 0;
+      for (var x = x0; x <= x1; x += 1) {
+        final value = lum[y * width + x];
+        if (value < 88 || value > 220) hits += 1;
       }
+      if (hits / math.max(1, x1 - x0 + 1) > 0.72) strongRows += 1;
+    }
+
+    for (var x = x0; x <= x1; x += 1) {
+      var hits = 0;
+      for (var y = y0; y <= y1; y += 1) {
+        final value = lum[y * width + x];
+        if (value < 88 || value > 220) hits += 1;
+      }
+      if (hits / math.max(1, y1 - y0 + 1) > 0.72) strongCols += 1;
+    }
+
+    return _clamp01((math.max(strongRows, strongCols) - 1) / 5);
+  }
+
+  double repeatedPenalty(_Spot spot) {
+    final similar = rawSpots.where((other) {
+      if (identical(other, spot) || other.kind != spot.kind) return false;
+      final dist = math.sqrt(
+          math.pow(spot.cx - other.cx, 2) + math.pow(spot.cy - other.cy, 2));
+      if (dist > 120) return false;
+      final sizeRatio = math.max(spot.area, other.area) /
+          math.max(1, math.min(spot.area, other.area));
+      return sizeRatio < 2.4;
+    }).length;
+    return _clamp01(similar / 5);
+  }
+
+  double edgePenalty(_Spot spot) {
+    final margin = math.min(math.min(spot.x, spot.y),
+        math.min(width - 1 - spot.x1, height - 1 - spot.y1));
+    return margin >= 8 ? 0 : (8 - margin) / 24;
+  }
+
+  double nearestEvidence(_Spot spot, List<String> kinds) {
+    var best = 0.0;
+    for (final other in rawSpots) {
+      if (identical(other, spot) || !kinds.contains(other.kind)) continue;
+      final dist = math.sqrt(
+          math.pow(spot.cx - other.cx, 2) + math.pow(spot.cy - other.cy, 2));
+      final radius = math.max(
+          22,
+          math.min(
+              liveMode ? 70 : 110,
+              math.max(math.max(spot.w, spot.h), math.max(other.w, other.h)) *
+                      2.2 +
+                  18));
+      if (dist > radius) continue;
+      final sizeRatio = math.max(spot.area, other.area) /
+          math.max(1, math.min(spot.area, other.area));
+      if (sizeRatio > 10) continue;
+      best = math.max(
+          best,
+          _clamp01(1 - dist / radius) * 0.65 +
+              other.shape * 0.25 +
+              _clamp01(other.count / 120) * 0.1);
+    }
+    return best;
+  }
+
+  SuspiciousBox verifyLensCandidate(_Spot spot) {
+    final ring = ringStats(spot,
+        math.max(6, math.min(18, (math.max(spot.w, spot.h) * 0.35).round())));
+    final radial = radialStats(spot);
+    final flashDelta = flashDeltaStats(spot);
+    final symmetryScore = radialSymmetryScore(spot);
+    final localContrast = (spot.mean - ring.mean).abs();
+    final diameter = math.max(spot.w, spot.h);
+    final minDiameter = liveMode ? 3 : 4;
+    final maxDiameter = liveMode ? 86 : 132;
+    final sizeScore = _clamp01((diameter - minDiameter) / 18) *
+        _clamp01((maxDiameter - diameter) / maxDiameter + 0.5);
+    final contrastScore =
+        _clamp01(math.max(localContrast, radial.contrast) / 65);
+    final highlightScore = spot.kind == 'bright' || spot.kind == 'glass'
+        ? _clamp01((spot.mean - ring.mean + 22) / 95)
+        : radial.brightRatio > 0.018
+            ? 0.28
+            : 0.0;
+    final darkCoreScore = spot.kind == 'dark'
+        ? _clamp01((ring.mean - spot.mean + 18) / 85)
+        : nearestEvidence(spot, ['dark']) * 0.42;
+    final companionScore = spot.kind == 'dark'
+        ? nearestEvidence(spot, ['bright', 'glass'])
+        : nearestEvidence(spot, ['dark', 'bright', 'glass']);
+    final retroReflectionScore =
+        math.max(radial.compactHighlight, flashDelta.score);
+    final artifactPenalty = linePenalty(spot) * 0.24 +
+        repeatedPenalty(spot) * 0.26 +
+        edgePenalty(spot) * 0.22 +
+        glarePenalty(spot, radial) +
+        _clamp01(ring.std / 150) * 0.06;
+
+    final evidenceFlags = [
+      spot.shape >= 0.54,
+      symmetryScore >= 0.5,
+      contrastScore >= 0.38,
+      retroReflectionScore >= 0.34,
+      darkCoreScore >= 0.28,
+      companionScore >= 0.26,
+    ];
+    final evidenceCount = evidenceFlags.where((flag) => flag).length;
+    final strongOpticalEvidence =
+        (retroReflectionScore >= 0.62 && spot.shape >= 0.48) ||
+            (darkCoreScore >= 0.52 && contrastScore >= 0.42) ||
+            (companionScore >= 0.46 && contrastScore >= 0.38);
+    final requiredEvidence = sensitivity == 'high' ? 2 : 3;
+    final crossCheckPenalty =
+        evidenceCount >= requiredEvidence || strongOpticalEvidence
+            ? 0.0
+            : 0.16 + (requiredEvidence - evidenceCount) * 0.08;
+
+    final score = _clamp01(0.14 +
+        spot.shape * 0.18 +
+        symmetryScore * 0.1 +
+        sizeScore * 0.12 +
+        contrastScore * 0.16 +
+        highlightScore * 0.12 +
+        darkCoreScore * 0.12 +
+        companionScore * 0.1 +
+        retroReflectionScore * 0.12 -
+        artifactPenalty -
+        crossCheckPenalty);
+
+    var type = '렌즈 후보';
+    var reason = '원형 형태와 주변 대비가 렌즈 패턴과 유사함';
+    if (spot.kind == 'dark') {
+      type = companionScore > 0.22 ? '렌즈 코어 의심' : '어두운 렌즈 후보';
+      reason = companionScore > 0.22
+          ? '어두운 코어와 가까운 반사/유리면 후보가 함께 확인됨'
+          : '주변보다 어두운 원형 렌즈 후보';
+    } else if (spot.kind == 'bright') {
+      type = '렌즈 반사 의심';
+      reason = flashDelta.score > 0.28
+          ? '프레임 간 밝기 증분이 큰 원형 반사 후보'
+          : '강한 반사와 원형 렌즈 표면 후보';
+    } else if (spot.kind == 'glass') {
+      type = '렌즈 표면 의심';
+      reason = '빛을 받은 유리면/코팅 반사 후보';
+    }
+
+    final confidence = (score * 100).round();
+    return SuspiciousBox(
+      x: spot.x,
+      y: spot.y,
+      w: spot.w,
+      h: spot.h,
+      score: score,
+      confidence: confidence,
+      risk: _riskFromScore(score),
+      type: type,
+      reason: reason,
+      evidence: {
+        'shape': (spot.shape * 100).round(),
+        'symmetry': (symmetryScore * 100).round(),
+        'contrast': (contrastScore * 100).round(),
+        'retroReflection': (retroReflectionScore * 100).round(),
+        'darkCore': (darkCoreScore * 100).round(),
+        'companion': (companionScore * 100).round(),
+        'crossChecks': evidenceCount,
+      },
+    );
+  }
+
+  final verified = rawSpots.map(verifyLensCandidate).where((spot) {
+    final crossChecks = spot.evidence['crossChecks'] ?? 0;
+    final retroReflection = spot.evidence['retroReflection'] ?? 0;
+    return spot.score >= threshold.fallbackScore &&
+        (crossChecks >= (sensitivity == 'high' ? 2 : 3) ||
+            retroReflection >= 62);
+  }).toList()
+    ..sort((a, b) => b.score.compareTo(a.score));
+
+  final merged = <SuspiciousBox>[];
+  for (final spot in verified) {
+    final duplicateIndex = merged.indexWhere((previous) {
+      final prevCx = previous.x + previous.w / 2;
+      final prevCy = previous.y + previous.h / 2;
+      final cx = spot.x + spot.w / 2;
+      final cy = spot.y + spot.h / 2;
+      final dist =
+          math.sqrt(math.pow(prevCx - cx, 2) + math.pow(prevCy - cy, 2));
+      return dist < math.max(14, math.min(previous.w, spot.w) * 0.55);
+    });
+    if (duplicateIndex == -1) {
+      merged.add(spot);
+    } else if (spot.score > merged[duplicateIndex].score) {
+      merged[duplicateIndex] = spot;
     }
   }
 
-  visitComponents(bright, visitedBright, true);
-  visitComponents(dark, visitedDark, false);
-  final result = boxes.values.toList()..sort((a, b) => b.score.compareTo(a.score));
-  return result.take(8).toList();
+  final strong =
+      merged.where((spot) => spot.score >= threshold.minScore).toList();
+  final fallback = strong.isNotEmpty
+      ? strong
+      : merged.take(math.min(2, threshold.maxOut)).toList();
+  final results = fallback
+      .where((item) => item.confidence >= minConfidence)
+      .toList()
+    ..sort((a, b) => b.score.compareTo(a.score));
+  return results.take(math.min(maxResults, threshold.maxOut)).toList();
 }
 
 class SafeLensApp extends StatelessWidget {
@@ -159,7 +851,8 @@ class SafeLensApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: _Palette.primary),
         snackBarTheme: const SnackBarThemeData(
           backgroundColor: _Palette.text,
-          contentTextStyle: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+          contentTextStyle:
+              TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
         ),
       ),
       home: const SafeLensHome(),
@@ -193,6 +886,9 @@ class _SafeLensHomeState extends State<SafeLensHome> {
   final _descController = TextEditingController();
   final _reportController = TextEditingController();
 
+  static const _detectorSensitivity = 'normal';
+  static const _detectorMinConfidence = 40;
+
   int _tab = 0;
   ui.Image? _previewImage;
   img.Image? _analysisImage;
@@ -200,8 +896,13 @@ class _SafeLensHomeState extends State<SafeLensHome> {
   CameraController? _cameraController;
   List<SuspiciousBox> _liveBoxes = [];
   Size? _liveSourceSize;
+  img.Image? _lastLiveAnalysisImage;
+  img.Image? _flashOffImage;
+  final List<List<SuspiciousBox>> _scanHistory = [];
+  String _flashPhase = 'captureOff';
   bool _cameraOn = false;
   bool _torchOn = false;
+  bool _flashDiffEnabled = false;
   bool _processingFrame = false;
   DateTime? _lastFrameScanAt;
   int _selectedHour = 0;
@@ -232,8 +933,10 @@ class _SafeLensHomeState extends State<SafeLensHome> {
     final bytes = await file.readAsBytes();
     final decoded = img.decodeImage(bytes);
     if (decoded == null) return;
-    final resized = decoded.width > 900 ? img.copyResize(decoded, width: 900) : decoded;
-    final codec = await ui.instantiateImageCodec(Uint8List.fromList(img.encodePng(resized)));
+    final resized =
+        decoded.width > 900 ? img.copyResize(decoded, width: 900) : decoded;
+    final codec = await ui
+        .instantiateImageCodec(Uint8List.fromList(img.encodePng(resized)));
     final frame = await codec.getNextFrame();
     setState(() {
       _analysisImage = resized;
@@ -245,7 +948,14 @@ class _SafeLensHomeState extends State<SafeLensHome> {
   void _analyzeImage() {
     final image = _analysisImage;
     if (image == null) return;
-    setState(() => _boxes = detectSuspiciousSpots(image));
+    setState(
+      () => _boxes = detectSuspiciousSpots(
+        image,
+        maxResults: 6,
+        sensitivity: _detectorSensitivity,
+        minConfidence: _detectorMinConfidence,
+      ),
+    );
   }
 
   void _syncSelectedTimeToText() {
@@ -280,15 +990,29 @@ class _SafeLensHomeState extends State<SafeLensHome> {
         (item) => item.lensDirection == CameraLensDirection.back,
         orElse: () => cameras.first,
       );
-      final controller = CameraController(camera, ResolutionPreset.medium, enableAudio: false);
+      final controller =
+          CameraController(camera, ResolutionPreset.medium, enableAudio: false);
       await controller.initialize();
+      var flashDiffEnabled = false;
+      try {
+        await controller.setFlashMode(FlashMode.off);
+        flashDiffEnabled = true;
+      } catch (_) {
+        flashDiffEnabled = false;
+      }
       setState(() {
         _cameraController = controller;
         _cameraOn = true;
         _liveBoxes = [];
         _liveSourceSize = null;
+        _lastLiveAnalysisImage = null;
+        _flashOffImage = null;
+        _scanHistory.clear();
+        _flashPhase = 'captureOff';
+        _flashDiffEnabled = flashDiffEnabled;
         _processingFrame = false;
         _lastFrameScanAt = null;
+        _torchOn = false;
       });
       try {
         await controller.startImageStream(_handleCameraImage);
@@ -310,6 +1034,11 @@ class _SafeLensHomeState extends State<SafeLensHome> {
       _cameraController = null;
       _liveBoxes = [];
       _liveSourceSize = null;
+      _lastLiveAnalysisImage = null;
+      _flashOffImage = null;
+      _scanHistory.clear();
+      _flashPhase = 'captureOff';
+      _flashDiffEnabled = false;
       _processingFrame = false;
       _lastFrameScanAt = null;
       _cameraOn = false;
@@ -317,39 +1046,150 @@ class _SafeLensHomeState extends State<SafeLensHome> {
     });
   }
 
-  Future<void> _toggleFlash() async {
-    final controller = _cameraController;
-    if (controller == null) return;
-    try {
-      final next = !_torchOn;
-      await controller.setFlashMode(next ? FlashMode.torch : FlashMode.off);
-      setState(() => _torchOn = next);
-    } catch (_) {
-      _showMessage('현재 기기에서 플래시 제어를 지원하지 않습니다.');
-    }
-  }
-
   void _handleCameraImage(CameraImage frame) {
     final now = DateTime.now();
     final lastScan = _lastFrameScanAt;
-    if (_processingFrame || (lastScan != null && now.difference(lastScan).inMilliseconds < 600)) {
+    if (_processingFrame ||
+        (lastScan != null && now.difference(lastScan).inMilliseconds < 600)) {
       return;
     }
     _processingFrame = true;
     _lastFrameScanAt = now;
+    _processCameraImage(frame);
+  }
 
+  Future<void> _processCameraImage(CameraImage frame) async {
     try {
       final image = _cameraImageToAnalysisImage(frame);
       if (image == null) return;
-      final nextBoxes = detectSuspiciousSpots(image);
+
+      List<SuspiciousBox> nextBoxes;
+      if (_flashDiffEnabled) {
+        if (_flashPhase == 'captureOff') {
+          _flashOffImage = image;
+          _flashPhase = 'captureOn';
+          try {
+            await _cameraController?.setFlashMode(FlashMode.torch);
+            if (mounted) setState(() => _torchOn = true);
+          } catch (_) {
+            _flashDiffEnabled = false;
+            _lastLiveAnalysisImage = image;
+          }
+          return;
+        }
+
+        nextBoxes = detectSuspiciousSpots(
+          image,
+          maxResults: 5,
+          minConfidence: _detectorMinConfidence,
+          liveMode: true,
+          sensitivity: _detectorSensitivity,
+          previousImage: _flashOffImage,
+        );
+        _flashOffImage = null;
+        _flashPhase = 'captureOff';
+        try {
+          await _cameraController?.setFlashMode(FlashMode.off);
+          if (mounted) setState(() => _torchOn = false);
+        } catch (_) {
+          _flashDiffEnabled = false;
+        }
+      } else {
+        nextBoxes = detectSuspiciousSpots(
+          image,
+          maxResults: 5,
+          minConfidence: _detectorMinConfidence,
+          liveMode: true,
+          sensitivity: _detectorSensitivity,
+          previousImage: _lastLiveAnalysisImage,
+        );
+        _lastLiveAnalysisImage = image;
+      }
+
+      final stableBoxes = _mergeScanFrames(nextBoxes);
       if (!mounted) return;
       setState(() {
-        _liveBoxes = nextBoxes;
+        _liveBoxes = stableBoxes;
         _liveSourceSize = Size(image.width.toDouble(), image.height.toDouble());
       });
     } finally {
       _processingFrame = false;
     }
+  }
+
+  List<SuspiciousBox> _mergeScanFrames(List<SuspiciousBox> nextBoxes) {
+    _scanHistory.add(nextBoxes);
+    if (_scanHistory.length > 6) {
+      _scanHistory.removeAt(0);
+    }
+    if (_scanHistory.length < 2) {
+      return [];
+    }
+
+    final frames = _scanHistory.length > 5
+        ? _scanHistory.sublist(_scanHistory.length - 5)
+        : List<List<SuspiciousBox>>.from(_scanHistory);
+    final clusters = <_ScanCluster>[];
+
+    for (var frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
+      for (final box in frames[frameIndex]) {
+        final cx = box.x + box.w / 2;
+        final cy = box.y + box.h / 2;
+        _ScanCluster? match;
+        for (final cluster in clusters) {
+          final dist = math.sqrt(
+            math.pow(cluster.cx - cx, 2) + math.pow(cluster.cy - cy, 2),
+          );
+          final sizeMatch =
+              (cluster.w - box.w).abs() < math.max(20, cluster.w * 0.4) &&
+                  (cluster.h - box.h).abs() < math.max(20, cluster.h * 0.4);
+          if (dist < math.max(30, math.min(cluster.w, box.w) * 0.35) &&
+              sizeMatch) {
+            match = cluster;
+            break;
+          }
+        }
+
+        if (match == null) {
+          clusters.add(_ScanCluster(box, frameIndex));
+        } else {
+          match.add(box, frameIndex);
+        }
+      }
+    }
+
+    final minFrameCount = math.max(2, (frames.length * 0.45).ceil());
+    final merged = clusters
+        .where((cluster) => cluster.framesSeen.length >= minFrameCount)
+        .map((cluster) {
+      final persistence = cluster.framesSeen.length / frames.length;
+      final averageConfidence =
+          cluster.sumConfidence / math.max(1, cluster.count);
+      final confidence = math
+          .min(
+            99,
+            cluster.bestConfidence * 0.72 +
+                averageConfidence * 0.18 +
+                persistence * 10,
+          )
+          .round();
+      return cluster.best.copyWith(
+        x: (cluster.sumX / cluster.count).round(),
+        y: (cluster.sumY / cluster.count).round(),
+        w: (cluster.sumW / cluster.count).round(),
+        h: (cluster.sumH / cluster.count).round(),
+        score: confidence / 100,
+        confidence: confidence,
+        risk: _riskFromScore(confidence / 100),
+        evidence: {
+          ...cluster.best.evidence,
+          'persistence': (persistence * 100).round(),
+        },
+      );
+    }).toList()
+      ..sort((a, b) => b.confidence.compareTo(a.confidence));
+
+    return merged;
   }
 
   img.Image? _cameraImageToAnalysisImage(CameraImage frame) {
@@ -421,7 +1261,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
       return;
     }
     final dir = await getApplicationDocumentsDirectory();
-    await File('${dir.path}/safelens_report.txt').writeAsString(_reportController.text);
+    await File('${dir.path}/safelens_report.txt')
+        .writeAsString(_reportController.text);
     _showMessage('safelens_report.txt 파일로 저장했습니다.');
   }
 
@@ -486,7 +1327,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
 
   void _showMessage(String message) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -515,7 +1357,9 @@ class _SafeLensHomeState extends State<SafeLensHome> {
                   ),
                 ),
               ),
-              _BottomTabs(selected: _tab, onChanged: (value) => setState(() => _tab = value)),
+              _BottomTabs(
+                  selected: _tab,
+                  onChanged: (value) => setState(() => _tab = value)),
             ],
           ),
         ),
@@ -547,12 +1391,16 @@ class _SafeLensHomeState extends State<SafeLensHome> {
                 children: [
                   Text(
                     'SafeLens',
-                    style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: _Palette.text),
+                    style: TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w900,
+                        color: _Palette.text),
                   ),
                   SizedBox(height: 4),
                   Text(
                     '현장 확인과 신고 준비를 한 화면 흐름으로 정리합니다.',
-                    style: TextStyle(fontSize: 15, color: _Palette.subText, height: 1.35),
+                    style: TextStyle(
+                        fontSize: 15, color: _Palette.subText, height: 1.35),
                   ),
                 ],
               ),
@@ -599,7 +1447,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
           ),
           child: const Text(
             '앱 결과는 확정 판정이 아니라 신고와 현장 확인을 돕는 참고 정보입니다.',
-            style: TextStyle(color: _Palette.subText, fontSize: 16, height: 1.4),
+            style:
+                TextStyle(color: _Palette.subText, fontSize: 16, height: 1.4),
           ),
         ),
       ],
@@ -625,7 +1474,9 @@ class _SafeLensHomeState extends State<SafeLensHome> {
               Expanded(
                 child: _ActionButton(
                   label: '초기화',
-                  onTap: _analysisImage == null ? null : () => setState(() => _boxes = []),
+                  onTap: _analysisImage == null
+                      ? null
+                      : () => setState(() => _boxes = []),
                 ),
               ),
             ],
@@ -649,7 +1500,9 @@ class _SafeLensHomeState extends State<SafeLensHome> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              _boxes.isEmpty ? '사진을 선택한 뒤 분석을 실행하세요.' : '의심 지점 좌표를 확인해 현장 스캔으로 이동하세요.',
+              _boxes.isEmpty
+                  ? '사진을 선택한 뒤 분석을 실행하세요.'
+                  : '의심 지점 좌표를 확인해 현장 스캔으로 이동하세요.',
               style: const TextStyle(color: _Palette.subText, fontSize: 16),
             ),
           ),
@@ -667,7 +1520,12 @@ class _SafeLensHomeState extends State<SafeLensHome> {
                 child: Text(
                   _boxes.isEmpty
                       ? '분석 결과가 여기에 표시됩니다.'
-                      : _boxes.asMap().entries.map((e) => '#${e.key + 1} (${e.value.x}, ${e.value.y})').join('  /  '),
+                      : _boxes
+                          .asMap()
+                          .entries
+                          .map((e) =>
+                              '#${e.key + 1} (${e.value.x}, ${e.value.y})')
+                          .join('  /  '),
                   style: const TextStyle(color: _Palette.subText, fontSize: 16),
                 ),
               ),
@@ -694,18 +1552,24 @@ class _SafeLensHomeState extends State<SafeLensHome> {
           Row(
             children: [
               Expanded(
-                child: _ActionButton(label: '시작', filled: true, onTap: _cameraOn ? null : _startCamera),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _ActionButton(label: '중지', onTap: _cameraOn ? _stopCamera : null),
+                child: _ActionButton(
+                    label: '시작',
+                    filled: true,
+                    onTap: _cameraOn ? null : _startCamera),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _ActionButton(
-                  label: _torchOn ? '플래시 끄기' : '플래시',
+                    label: '중지', onTap: _cameraOn ? _stopCamera : null),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _ActionButton(
+                  label: _flashDiffEnabled
+                      ? (_torchOn ? 'ON 프레임' : 'OFF 프레임')
+                      : '플래시 미지원',
                   filled: _torchOn,
-                  onTap: _cameraOn ? _toggleFlash : null,
+                  onTap: null,
                 ),
               ),
             ],
@@ -720,7 +1584,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
                       fit: StackFit.expand,
                       children: [
                         CameraPreview(controller),
-                        CustomPaint(painter: BoxPainter(_liveBoxes, _liveSourceSize)),
+                        CustomPaint(
+                            painter: BoxPainter(_liveBoxes, _liveSourceSize)),
                       ],
                     ),
             ),
@@ -728,7 +1593,9 @@ class _SafeLensHomeState extends State<SafeLensHome> {
           const SizedBox(height: 10),
           Text(
             _cameraOn
-                ? (_liveBoxes.isEmpty ? '현재 표시할 의심 후보가 없습니다.' : '실시간 의심 후보 ${_liveBoxes.length}개 표시 중')
+                ? (_liveBoxes.isEmpty
+                    ? '현재 표시할 의심 후보가 없습니다.'
+                    : '실시간 의심 후보 ${_liveBoxes.length}개 표시 중')
                 : '카메라를 시작하면 실시간 후보가 화면에 표시됩니다.',
             style: const TextStyle(color: _Palette.subText, fontSize: 15),
           ),
@@ -754,7 +1621,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
           Row(
             children: [
               Expanded(
-                child: _ActionButton(label: '문안 생성', filled: true, onTap: _buildReport),
+                child: _ActionButton(
+                    label: '문안 생성', filled: true, onTap: _buildReport),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -775,10 +1643,13 @@ class _SafeLensHomeState extends State<SafeLensHome> {
                   child: FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor: _Palette.danger,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: _call112,
-                    child: const Text('112', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                    child: const Text('112',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w900)),
                   ),
                 ),
               ),
@@ -798,7 +1669,11 @@ class _SafeLensHomeState extends State<SafeLensHome> {
             child: _ActionButton(label: '피해 대처 안내 보기', onTap: _openHelpPage),
           ),
           const SizedBox(height: 10),
-          _Field(controller: _reportController, hint: '신고 문안', lines: 10, readOnly: true),
+          _Field(
+              controller: _reportController,
+              hint: '신고 문안',
+              lines: 10,
+              readOnly: true),
         ],
       ),
     );
@@ -835,9 +1710,14 @@ class _TopHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('SafeLens', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _Palette.text)),
+                Text('SafeLens',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        color: _Palette.text)),
                 SizedBox(height: 2),
-                Text('의심 위치 확인 보조', style: TextStyle(fontSize: 13, color: _Palette.subText)),
+                Text('의심 위치 확인 보조',
+                    style: TextStyle(fontSize: 13, color: _Palette.subText)),
               ],
             ),
           ),
@@ -849,7 +1729,10 @@ class _TopHeader extends StatelessWidget {
             ),
             child: const Text(
               'Local',
-              style: TextStyle(fontSize: 13, color: _Palette.primary, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                  fontSize: 13,
+                  color: _Palette.primary,
+                  fontWeight: FontWeight.w800),
             ),
           ),
         ],
@@ -902,7 +1785,10 @@ class _HelpPage extends StatelessWidget {
                         children: [
                           const Text(
                             '불안하거나 피해가 의심될 때 바로 확인할 수 있는 대응 순서입니다.',
-                            style: TextStyle(color: _Palette.subText, fontSize: 16, height: 1.4),
+                            style: TextStyle(
+                                color: _Palette.subText,
+                                fontSize: 16,
+                                height: 1.4),
                           ),
                           const SizedBox(height: 12),
                           _HelpSection(
@@ -914,8 +1800,12 @@ class _HelpPage extends StatelessWidget {
                               '가해자와 직접 대면하거나 혼자 삭제를 요구하지 않습니다.',
                             ],
                             actions: [
-                              _HelpAction(label: '112 전화', onTap: () => _call('112'), danger: true),
-                              _HelpAction(label: '1366 전화', onTap: () => _call('1366')),
+                              _HelpAction(
+                                  label: '112 전화',
+                                  onTap: () => _call('112'),
+                                  danger: true),
+                              _HelpAction(
+                                  label: '1366 전화', onTap: () => _call('1366')),
                             ],
                           ),
                           _HelpSection(
@@ -937,8 +1827,12 @@ class _HelpPage extends StatelessWidget {
                               '지역 디지털성범죄피해자지원센터도 상담과 삭제 연계를 제공합니다.',
                             ],
                             actions: [
-                              _HelpAction(label: '센터 열기', onTap: () => _openUrl(_d4uUrl)),
-                              _HelpAction(label: '지역 센터', onTap: () => _openUrl(_regionUrl)),
+                              _HelpAction(
+                                  label: '센터 열기',
+                                  onTap: () => _openUrl(_d4uUrl)),
+                              _HelpAction(
+                                  label: '지역 센터',
+                                  onTap: () => _openUrl(_regionUrl)),
                             ],
                           ),
                           _HelpSection(
@@ -1012,7 +1906,9 @@ class _BottomTabs extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(item.icon, size: 24, color: active ? _Palette.primary : _Palette.subText),
+                      Icon(item.icon,
+                          size: 24,
+                          color: active ? _Palette.primary : _Palette.subText),
                       const SizedBox(height: 4),
                       Text(
                         item.label,
@@ -1075,13 +1971,18 @@ class _HomeLinkCard extends StatelessWidget {
                   color: highlighted ? _Palette.primary : _Palette.surfaceMuted,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, size: 26, color: highlighted ? Colors.white : _Palette.text),
+                child: Icon(icon,
+                    size: 26,
+                    color: highlighted ? Colors.white : _Palette.text),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: _Palette.text),
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      color: _Palette.text),
                 ),
               ),
               Text(
@@ -1093,7 +1994,8 @@ class _HomeLinkCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 6),
-              const Icon(Icons.chevron_right, size: 22, color: _Palette.subText),
+              const Icon(Icons.chevron_right,
+                  size: 22, color: _Palette.subText),
             ],
           ),
         ),
@@ -1103,7 +2005,8 @@ class _HomeLinkCard extends StatelessWidget {
 }
 
 class _Panel extends StatelessWidget {
-  const _Panel({required this.title, required this.status, required this.child});
+  const _Panel(
+      {required this.title, required this.status, required this.child});
 
   final String title;
   final String status;
@@ -1126,18 +2029,25 @@ class _Panel extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _Palette.text),
+                  style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      color: _Palette.text),
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: _Palette.surfaceMuted,
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   status,
-                  style: const TextStyle(fontSize: 13, color: _Palette.subText, fontWeight: FontWeight.w800),
+                  style: const TextStyle(
+                      fontSize: 13,
+                      color: _Palette.subText,
+                      fontWeight: FontWeight.w800),
                 ),
               ),
             ],
@@ -1191,7 +2101,10 @@ class _HelpSection extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: _Palette.text),
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      color: _Palette.text),
                 ),
               ),
             ],
@@ -1209,7 +2122,8 @@ class _HelpSection extends StatelessWidget {
                       width: 5,
                       height: 5,
                       child: DecoratedBox(
-                        decoration: BoxDecoration(color: _Palette.subText, shape: BoxShape.circle),
+                        decoration: BoxDecoration(
+                            color: _Palette.subText, shape: BoxShape.circle),
                       ),
                     ),
                   ),
@@ -1217,7 +2131,8 @@ class _HelpSection extends StatelessWidget {
                   Expanded(
                     child: Text(
                       item,
-                      style: const TextStyle(fontSize: 14, color: _Palette.subText, height: 1.35),
+                      style: const TextStyle(
+                          fontSize: 14, color: _Palette.subText, height: 1.35),
                     ),
                   ),
                 ],
@@ -1293,7 +2208,8 @@ class _ActionButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12),
         ),
         onPressed: onTap,
-        child: Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+        child: Text(label,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
       ),
     );
   }
@@ -1329,7 +2245,11 @@ class _TimeSelector extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Text('발견 시각', style: TextStyle(fontSize: 15, color: _Palette.subText, fontWeight: FontWeight.w700)),
+            const Text('발견 시각',
+                style: TextStyle(
+                    fontSize: 15,
+                    color: _Palette.subText,
+                    fontWeight: FontWeight.w700)),
             const SizedBox(width: 12),
             Expanded(
               child: DropdownButtonFormField<int>(
@@ -1360,7 +2280,8 @@ class _TimeSelector extends StatelessWidget {
             ),
             if (minuteDisabled) ...[
               const SizedBox(width: 8),
-              const Text('(24시는 00분만)', style: TextStyle(fontSize: 12, color: _Palette.subText)),
+              const Text('(24시는 00분만)',
+                  style: TextStyle(fontSize: 12, color: _Palette.subText)),
             ],
           ],
         ),
@@ -1388,7 +2309,11 @@ class _TimeSelector extends StatelessWidget {
 }
 
 class _Field extends StatelessWidget {
-  const _Field({required this.controller, required this.hint, this.lines = 1, this.readOnly = false});
+  const _Field(
+      {required this.controller,
+      required this.hint,
+      this.lines = 1,
+      this.readOnly = false});
 
   final TextEditingController controller;
   final String hint;
@@ -1456,7 +2381,8 @@ class _ImagePreview extends StatelessWidget {
         aspectRatio: current == null ? 4 / 3 : current.width / current.height,
         child: current == null
             ? const Center(
-                child: Text('선택한 이미지가 여기에 표시됩니다.', style: TextStyle(color: _Palette.subText)),
+                child: Text('선택한 이미지가 여기에 표시됩니다.',
+                    style: TextStyle(color: _Palette.subText)),
               )
             : CustomPaint(painter: ImageBoxPainter(current, boxes)),
       ),
@@ -1478,7 +2404,8 @@ class ImageBoxPainter extends CustomPainter {
       Rect.fromLTWH(0, 0, size.width, size.height),
       Paint(),
     );
-    BoxPainter(boxes, Size(image.width.toDouble(), image.height.toDouble())).paint(canvas, size);
+    BoxPainter(boxes, Size(image.width.toDouble(), image.height.toDouble()))
+        .paint(canvas, size);
   }
 
   @override
@@ -1507,7 +2434,8 @@ class BoxPainter extends CustomPainter {
 
     for (var i = 0; i < boxes.length; i += 1) {
       final box = boxes[i];
-      final rect = Rect.fromLTWH(box.x * sx, box.y * sy, box.w * sx, box.h * sy);
+      final rect =
+          Rect.fromLTWH(box.x * sx, box.y * sy, box.w * sx, box.h * sy);
       canvas.drawRect(rect, stroke);
 
       final textPainter = TextPainter(
@@ -1519,7 +2447,8 @@ class BoxPainter extends CustomPainter {
       )..layout();
 
       final top = math.max(0.0, rect.top - 18);
-      canvas.drawRect(Rect.fromLTWH(rect.left, top, textPainter.width + 8, 18), labelBg);
+      canvas.drawRect(
+          Rect.fromLTWH(rect.left, top, textPainter.width + 8, 18), labelBg);
       textPainter.paint(canvas, Offset(rect.left + 4, top + 2));
     }
   }
