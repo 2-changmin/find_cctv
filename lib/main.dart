@@ -194,8 +194,12 @@ class _SafeLensHomeState extends State<SafeLensHome> {
   img.Image? _analysisImage;
   List<SuspiciousBox> _boxes = [];
   CameraController? _cameraController;
+  List<SuspiciousBox> _liveBoxes = [];
+  Size? _liveSourceSize;
   bool _cameraOn = false;
   bool _torchOn = false;
+  bool _processingFrame = false;
+  DateTime? _lastFrameScanAt;
   int _selectedHour = 0;
   int _selectedMinute = 0;
 
@@ -277,16 +281,33 @@ class _SafeLensHomeState extends State<SafeLensHome> {
       setState(() {
         _cameraController = controller;
         _cameraOn = true;
+        _liveBoxes = [];
+        _liveSourceSize = null;
+        _processingFrame = false;
+        _lastFrameScanAt = null;
       });
+      try {
+        await controller.startImageStream(_handleCameraImage);
+      } catch (_) {
+        _showMessage('실시간 의심 지점 표시는 현재 카메라에서 지원되지 않습니다.');
+      }
     } catch (_) {
       _showMessage('카메라 권한 또는 장치 상태를 확인해주세요.');
     }
   }
 
   Future<void> _stopCamera() async {
-    await _cameraController?.dispose();
+    final controller = _cameraController;
+    if (controller != null && controller.value.isStreamingImages) {
+      await controller.stopImageStream();
+    }
+    await controller?.dispose();
     setState(() {
       _cameraController = null;
+      _liveBoxes = [];
+      _liveSourceSize = null;
+      _processingFrame = false;
+      _lastFrameScanAt = null;
       _cameraOn = false;
       _torchOn = false;
     });
@@ -302,6 +323,79 @@ class _SafeLensHomeState extends State<SafeLensHome> {
     } catch (_) {
       _showMessage('현재 기기에서 플래시 제어를 지원하지 않습니다.');
     }
+  }
+
+  void _handleCameraImage(CameraImage frame) {
+    final now = DateTime.now();
+    final lastScan = _lastFrameScanAt;
+    if (_processingFrame || (lastScan != null && now.difference(lastScan).inMilliseconds < 600)) {
+      return;
+    }
+    _processingFrame = true;
+    _lastFrameScanAt = now;
+
+    try {
+      final image = _cameraImageToAnalysisImage(frame);
+      if (image == null) return;
+      final nextBoxes = detectSuspiciousSpots(image);
+      if (!mounted) return;
+      setState(() {
+        _liveBoxes = nextBoxes;
+        _liveSourceSize = Size(image.width.toDouble(), image.height.toDouble());
+      });
+    } finally {
+      _processingFrame = false;
+    }
+  }
+
+  img.Image? _cameraImageToAnalysisImage(CameraImage frame) {
+    return switch (frame.format.group) {
+      ImageFormatGroup.yuv420 => _yPlaneToAnalysisImage(frame),
+      ImageFormatGroup.bgra8888 => _bgraToAnalysisImage(frame),
+      _ => null,
+    };
+  }
+
+  img.Image _yPlaneToAnalysisImage(CameraImage frame) {
+    final plane = frame.planes.first;
+    final sampleStep = math.max(1, (frame.width / 360).ceil());
+    final width = frame.width ~/ sampleStep;
+    final height = frame.height ~/ sampleStep;
+    final output = img.Image(width: width, height: height);
+
+    for (var y = 0; y < height; y += 1) {
+      final sourceY = y * sampleStep;
+      for (var x = 0; x < width; x += 1) {
+        final sourceX = x * sampleStep;
+        final value = plane.bytes[sourceY * plane.bytesPerRow + sourceX];
+        output.setPixelRgb(x, y, value, value, value);
+      }
+    }
+
+    return output;
+  }
+
+  img.Image _bgraToAnalysisImage(CameraImage frame) {
+    final plane = frame.planes.first;
+    final bytesPerPixel = plane.bytesPerPixel ?? 4;
+    final sampleStep = math.max(1, (frame.width / 360).ceil());
+    final width = frame.width ~/ sampleStep;
+    final height = frame.height ~/ sampleStep;
+    final output = img.Image(width: width, height: height);
+
+    for (var y = 0; y < height; y += 1) {
+      final sourceY = y * sampleStep;
+      for (var x = 0; x < width; x += 1) {
+        final sourceX = x * sampleStep;
+        final offset = sourceY * plane.bytesPerRow + sourceX * bytesPerPixel;
+        final blue = plane.bytes[offset];
+        final green = plane.bytes[offset + 1];
+        final red = plane.bytes[offset + 2];
+        output.setPixelRgb(x, y, red, green, blue);
+      }
+    }
+
+    return output;
   }
 
   void _buildReport() {
@@ -583,7 +677,7 @@ class _SafeLensHomeState extends State<SafeLensHome> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '이 화면은 AI 탐지가 아니라, 사용자가 플래시 반사를 직접 확인하는 현장 도구입니다.',
+            '플래시 반사 후보를 실시간으로 표시합니다. 표시된 지점은 확정 판정이 아니라 확인용 참고 정보입니다.',
             style: TextStyle(color: _Palette.subText, fontSize: 16),
           ),
           const SizedBox(height: 12),
@@ -612,8 +706,21 @@ class _SafeLensHomeState extends State<SafeLensHome> {
             child: _PreviewFrame(
               child: controller == null || !controller.value.isInitialized
                   ? const Center(child: Text('카메라 시작 후 이곳에서 반사 확인'))
-                  : CameraPreview(controller),
+                  : Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CameraPreview(controller),
+                        CustomPaint(painter: BoxPainter(_liveBoxes, _liveSourceSize)),
+                      ],
+                    ),
             ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _cameraOn
+                ? (_liveBoxes.isEmpty ? '현재 표시할 의심 후보가 없습니다.' : '실시간 의심 후보 ${_liveBoxes.length}개 표시 중')
+                : '카메라를 시작하면 실시간 후보가 화면에 표시됩니다.',
+            style: const TextStyle(color: _Palette.subText, fontSize: 15),
           ),
         ],
       ),
