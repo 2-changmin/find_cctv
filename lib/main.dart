@@ -251,7 +251,7 @@ class _ScanCluster {
 
 List<SuspiciousBox> detectSuspiciousSpots(
   img.Image source, {
-  int maxResults = 8,
+  int? maxResults,
   int minConfidence = 0,
   bool liveMode = false,
   String sensitivity = 'normal',
@@ -827,14 +827,16 @@ List<SuspiciousBox> detectSuspiciousSpots(
 
   final strong =
       merged.where((spot) => spot.score >= threshold.minScore).toList();
-  final fallback = strong.isNotEmpty
-      ? strong
-      : merged.take(math.min(2, threshold.maxOut)).toList();
+  final fallback = strong.isNotEmpty ? strong : merged;
   final results = fallback
       .where((item) => item.confidence >= minConfidence)
       .toList()
     ..sort((a, b) => b.score.compareTo(a.score));
-  return results.take(math.min(maxResults, threshold.maxOut)).toList();
+  if (maxResults == null) {
+    return results;
+  }
+  final limit = liveMode ? math.min(maxResults, threshold.maxOut) : maxResults;
+  return results.take(limit).toList();
 }
 
 class SafeLensApp extends StatelessWidget {
@@ -872,6 +874,14 @@ class _Palette {
   static const danger = Color(0xffef4444);
 }
 
+Color _riskColor(String risk) {
+  return switch (risk) {
+    '높음' => _Palette.danger,
+    '주의' => const Color(0xfff59e0b),
+    _ => const Color(0xff38bdf8),
+  };
+}
+
 class SafeLensHome extends StatefulWidget {
   const SafeLensHome({super.key});
 
@@ -887,7 +897,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
   final _reportController = TextEditingController();
 
   static const _detectorSensitivity = 'normal';
-  static const _detectorMinConfidence = 40;
+  static const _photoMinConfidence = 70;
+  static const _liveMinConfidence = 40;
 
   int _tab = 0;
   ui.Image? _previewImage;
@@ -951,9 +962,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
     setState(
       () => _boxes = detectSuspiciousSpots(
         image,
-        maxResults: 6,
         sensitivity: _detectorSensitivity,
-        minConfidence: _detectorMinConfidence,
+        minConfidence: _photoMinConfidence,
       ),
     );
   }
@@ -1081,7 +1091,7 @@ class _SafeLensHomeState extends State<SafeLensHome> {
         nextBoxes = detectSuspiciousSpots(
           image,
           maxResults: 5,
-          minConfidence: _detectorMinConfidence,
+          minConfidence: _liveMinConfidence,
           liveMode: true,
           sensitivity: _detectorSensitivity,
           previousImage: _flashOffImage,
@@ -1098,7 +1108,7 @@ class _SafeLensHomeState extends State<SafeLensHome> {
         nextBoxes = detectSuspiciousSpots(
           image,
           maxResults: 5,
-          minConfidence: _detectorMinConfidence,
+          minConfidence: _liveMinConfidence,
           liveMode: true,
           sensitivity: _detectorSensitivity,
           previousImage: _lastLiveAnalysisImage,
@@ -1502,35 +1512,12 @@ class _SafeLensHomeState extends State<SafeLensHome> {
             child: Text(
               _boxes.isEmpty
                   ? '사진을 선택한 뒤 분석을 실행하세요.'
-                  : '의심 지점 좌표를 확인해 현장 스캔으로 이동하세요.',
+                  : '의심 후보 ${_boxes.length}개를 표시했습니다.',
               style: const TextStyle(color: _Palette.subText, fontSize: 16),
             ),
           ),
-          const SizedBox(height: 8),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: _Palette.surfaceMuted,
-              border: Border.all(color: _Palette.line),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: SizedBox(
-              width: double.infinity,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(
-                  _boxes.isEmpty
-                      ? '분석 결과가 여기에 표시됩니다.'
-                      : _boxes
-                          .asMap()
-                          .entries
-                          .map((e) =>
-                              '#${e.key + 1} (${e.value.x}, ${e.value.y})')
-                          .join('  /  '),
-                  style: const TextStyle(color: _Palette.subText, fontSize: 16),
-                ),
-              ),
-            ),
-          ),
+          const SizedBox(height: 10),
+          _DetectionResultList(boxes: _boxes),
         ],
       ),
     );
@@ -1595,7 +1582,7 @@ class _SafeLensHomeState extends State<SafeLensHome> {
             _cameraOn
                 ? (_liveBoxes.isEmpty
                     ? '현재 표시할 의심 후보가 없습니다.'
-                    : '실시간 의심 후보 ${_liveBoxes.length}개 표시 중')
+                    : '자동 플래시 차분 · 현재 후보 ${_liveBoxes.length}개 · 반복 확인된 위치만 표시합니다.')
                 : '카메라를 시작하면 실시간 후보가 화면에 표시됩니다.',
             style: const TextStyle(color: _Palette.subText, fontSize: 15),
           ),
@@ -2349,6 +2336,135 @@ class _Field extends StatelessWidget {
   }
 }
 
+class _DetectionResultList extends StatelessWidget {
+  const _DetectionResultList({required this.boxes});
+
+  final List<SuspiciousBox> boxes;
+
+  @override
+  Widget build(BuildContext context) {
+    if (boxes.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: _Palette.surfaceMuted,
+          border: Border.all(color: _Palette.line),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Text(
+          '분석 결과가 여기에 표시됩니다.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: _Palette.subText, fontSize: 16),
+        ),
+      );
+    }
+
+    return Column(
+      children: boxes
+          .asMap()
+          .entries
+          .map(
+            (entry) => Padding(
+              padding: EdgeInsets.only(
+                  bottom: entry.key == boxes.length - 1 ? 0 : 10),
+              child:
+                  _DetectionResultCard(index: entry.key + 1, box: entry.value),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+class _DetectionResultCard extends StatelessWidget {
+  const _DetectionResultCard({required this.index, required this.box});
+
+  final int index;
+  final SuspiciousBox box;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _riskColor(box.risk);
+    return Container(
+      width: double.infinity,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: _Palette.surface,
+        border: Border.all(color: _Palette.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            child: ColoredBox(
+              color: color,
+              child: const SizedBox(width: 6),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 14, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '#$index ${box.type}',
+                        style: const TextStyle(
+                          color: _Palette.text,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        box.reason,
+                        style: const TextStyle(
+                          color: _Palette.subText,
+                          fontSize: 15,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      box.risk,
+                      style: const TextStyle(
+                        color: _Palette.text,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${box.confidence}%',
+                      style: const TextStyle(
+                        color: _Palette.subText,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PreviewFrame extends StatelessWidget {
   const _PreviewFrame({required this.child});
 
@@ -2426,30 +2542,35 @@ class BoxPainter extends CustomPainter {
 
     final sx = size.width / source.width;
     final sy = size.height / source.height;
-    final stroke = Paint()
-      ..color = const Color(0xfffacc15)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    final labelBg = Paint()..color = const Color(0xffbe123c);
 
     for (var i = 0; i < boxes.length; i += 1) {
       final box = boxes[i];
+      final color = _riskColor(box.risk);
+      final stroke = Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+      final labelBg = Paint()..color = color;
       final rect =
           Rect.fromLTWH(box.x * sx, box.y * sy, box.w * sx, box.h * sy);
       canvas.drawRect(rect, stroke);
 
       final textPainter = TextPainter(
         text: TextSpan(
-          text: '의심 ${i + 1}',
-          style: const TextStyle(color: Colors.white, fontSize: 12),
+          text: '${i + 1} ${box.risk}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+          ),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
 
-      final top = math.max(0.0, rect.top - 18);
+      final top = math.max(0.0, rect.top - 20);
       canvas.drawRect(
-          Rect.fromLTWH(rect.left, top, textPainter.width + 8, 18), labelBg);
-      textPainter.paint(canvas, Offset(rect.left + 4, top + 2));
+          Rect.fromLTWH(rect.left, top, textPainter.width + 10, 20), labelBg);
+      textPainter.paint(canvas, Offset(rect.left + 5, top + 3));
     }
   }
 
