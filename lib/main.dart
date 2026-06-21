@@ -155,7 +155,12 @@ class SafeLensApp extends StatelessWidget {
       title: 'SafeLens',
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff6f94d9)),
+        scaffoldBackgroundColor: _Palette.bg,
+        colorScheme: ColorScheme.fromSeed(seedColor: _Palette.primary),
+        snackBarTheme: const SnackBarThemeData(
+          backgroundColor: _Palette.text,
+          contentTextStyle: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
       ),
       home: const SafeLensHome(),
     );
@@ -163,16 +168,15 @@ class SafeLensApp extends StatelessWidget {
 }
 
 class _Palette {
-  static const bgTop = Color(0xffdfe7f6);
-  static const bgBottom = Color(0xffedf3f8);
-  static const surface = Color(0xfff7f9fd);
-  static const line = Color(0xffc8d3e4);
-  static const text = Color(0xff26324b);
-  static const subText = Color(0xff6d7890);
-  static const chipBg = Color(0xffd8f0ee);
-  static const primaryStart = Color(0xff8daee6);
-  static const primaryEnd = Color(0xff88cfcc);
-  static const danger = Color(0xffcf4550);
+  static const bg = Color(0xfff6f7fb);
+  static const surface = Color(0xffffffff);
+  static const surfaceMuted = Color(0xfff1f4f8);
+  static const line = Color(0xffe3e7ee);
+  static const text = Color(0xff111827);
+  static const subText = Color(0xff6b7280);
+  static const primary = Color(0xff2563eb);
+  static const primarySoft = Color(0xffeaf1ff);
+  static const danger = Color(0xffef4444);
 }
 
 class SafeLensHome extends StatefulWidget {
@@ -489,15 +493,9 @@ class _SafeLensHomeState extends State<SafeLensHome> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: _Palette.bg,
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [_Palette.bgTop, _Palette.bgBottom],
-          ),
-        ),
+        color: _Palette.bg,
         child: SafeArea(
           child: Column(
             children: [
@@ -529,28 +527,39 @@ class _SafeLensHomeState extends State<SafeLensHome> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 138,
-          height: 138,
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.55),
-            borderRadius: BorderRadius.circular(28),
-            boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 16, offset: Offset(0, 8))],
-          ),
-          child: Image.asset('public/app-icon.png'),
+        Row(
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: _Palette.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _Palette.line),
+              ),
+              child: Image.asset('public/app-icon.png'),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'SafeLens',
+                    style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: _Palette.text),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '현장 확인과 신고 준비를 한 화면 흐름으로 정리합니다.',
+                    style: TextStyle(fontSize: 15, color: _Palette.subText, height: 1.35),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 20),
-        const Text(
-          'SafeLens',
-          style: TextStyle(fontSize: 68 / 1.8, fontWeight: FontWeight.w800, color: _Palette.text),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          '사진 분석과 실시간 반사 확인으로 의심 후보를 빠르게 표시합니다.',
-          style: TextStyle(fontSize: 18, color: _Palette.subText, height: 1.35),
-        ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 18),
         _HomeLinkCard(
           icon: Icons.search,
           title: '사진 분석',
@@ -584,8 +593,8 @@ class _SafeLensHomeState extends State<SafeLensHome> {
           width: double.infinity,
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(20),
+            color: _Palette.primarySoft,
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(color: _Palette.line),
           ),
           child: const Text(
@@ -647,8 +656,9 @@ class _SafeLensHomeState extends State<SafeLensHome> {
           const SizedBox(height: 8),
           DecoratedBox(
             decoration: BoxDecoration(
+              color: _Palette.surfaceMuted,
               border: Border.all(color: _Palette.line),
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: SizedBox(
               width: double.infinity,
@@ -750,21 +760,25 @@ class _SafeLensHomeState extends State<SafeLensHome> {
               Expanded(
                 child: _ActionButton(label: '저장', onTap: _saveReport),
               ),
-              const SizedBox(width: 8),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
               Expanded(
                 child: _ActionButton(label: '문자 신고', onTap: _sendSmsReport),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: SizedBox(
-                  height: 54,
+                  height: 50,
                   child: FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor: _Palette.danger,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: _call112,
-                    child: const Text('112', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                    child: const Text('112', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                   ),
                 ),
               ),
@@ -797,20 +811,22 @@ class _TopHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      color: Colors.white.withValues(alpha: 0.6),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: const BoxDecoration(
+        color: _Palette.surface,
+        border: Border(bottom: BorderSide(color: _Palette.line)),
+      ),
       child: Row(
         children: [
           Container(
-            width: 52,
-            height: 52,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 8, offset: Offset(0, 2))],
+              color: _Palette.surfaceMuted,
+              borderRadius: BorderRadius.circular(8),
             ),
             child: Padding(
-              padding: const EdgeInsets.all(6),
+              padding: const EdgeInsets.all(5),
               child: Image.asset('public/app-icon.png'),
             ),
           ),
@@ -819,20 +835,22 @@ class _TopHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('SafeLens', style: TextStyle(fontSize: 42 / 1.8, fontWeight: FontWeight.w800, color: _Palette.text)),
+                Text('SafeLens', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _Palette.text)),
                 SizedBox(height: 2),
-                Text('몰래카메라 의심 위치 탐지 보조', style: TextStyle(fontSize: 16, color: _Palette.subText)),
+                Text('의심 위치 확인 보조', style: TextStyle(fontSize: 13, color: _Palette.subText)),
               ],
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
-              color: _Palette.chipBg,
+              color: _Palette.primarySoft,
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: const Color(0xffa6d8d7), width: 1.6),
             ),
-            child: const Text('Private', style: TextStyle(fontSize: 18, color: Color(0xff3f6579))),
+            child: const Text(
+              'Local',
+              style: TextStyle(fontSize: 13, color: _Palette.primary, fontWeight: FontWeight.w800),
+            ),
           ),
         ],
       ),
@@ -864,15 +882,9 @@ class _HelpPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: _Palette.bg,
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [_Palette.bgTop, _Palette.bgBottom],
-          ),
-        ),
+        color: _Palette.bg,
         child: SafeArea(
           child: Column(
             children: [
@@ -976,10 +988,10 @@ class _BottomTabs extends StatelessWidget {
     ];
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.75),
-        border: const Border(top: BorderSide(color: Color(0xffd5deeb))),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
+      decoration: const BoxDecoration(
+        color: _Palette.surface,
+        border: Border(top: BorderSide(color: _Palette.line)),
       ),
       child: Row(
         children: List.generate(items.length, (index) {
@@ -989,25 +1001,26 @@ class _BottomTabs extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: InkWell(
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(8),
                 onTap: () => onChanged(index),
                 child: Ink(
-                  height: 92,
+                  height: 62,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(22),
-                    color: active ? null : const Color(0xffeef2f8),
-                    gradient: active
-                        ? const LinearGradient(colors: [_Palette.primaryStart, _Palette.primaryEnd])
-                        : null,
+                    borderRadius: BorderRadius.circular(8),
+                    color: active ? _Palette.primarySoft : Colors.transparent,
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(item.icon, size: 28, color: const Color(0xff4f5e7b)),
-                      const SizedBox(height: 6),
+                      Icon(item.icon, size: 24, color: active ? _Palette.primary : _Palette.subText),
+                      const SizedBox(height: 4),
                       Text(
                         item.label,
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xff4f5e7b)),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: active ? _Palette.primary : _Palette.subText,
+                        ),
                       ),
                     ],
                   ),
@@ -1041,40 +1054,46 @@ class _HomeLinkCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(8),
         onTap: onTap,
         child: Ink(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.72),
-            borderRadius: BorderRadius.circular(24),
+            color: _Palette.surface,
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: highlighted ? const Color(0xffadc2ea) : _Palette.line,
-              width: 1.6,
+              color: highlighted ? _Palette.primary : _Palette.line,
+              width: highlighted ? 1.4 : 1,
             ),
           ),
           child: Row(
             children: [
               Container(
-                width: 74,
-                height: 74,
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [_Palette.primaryStart, _Palette.primaryEnd]),
-                  borderRadius: BorderRadius.circular(22),
+                  color: highlighted ? _Palette.primary : _Palette.surfaceMuted,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, size: 36, color: const Color(0xff2f3b58)),
+                child: Icon(icon, size: 26, color: highlighted ? Colors.white : _Palette.text),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _Palette.text),
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: _Palette.text),
                 ),
               ),
               Text(
                 status,
-                style: const TextStyle(fontSize: 19, color: _Palette.subText, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: highlighted ? _Palette.primary : _Palette.subText,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
+              const SizedBox(width: 6),
+              const Icon(Icons.chevron_right, size: 22, color: _Palette.subText),
             ],
           ),
         ),
@@ -1096,8 +1115,8 @@ class _Panel extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _Palette.surface,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: _Palette.line, width: 1.4),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _Palette.line),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1107,18 +1126,18 @@ class _Panel extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: _Palette.text),
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _Palette.text),
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  border: Border.all(color: _Palette.line, width: 1.4),
+                  color: _Palette.surfaceMuted,
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   status,
-                  style: const TextStyle(fontSize: 14, color: _Palette.subText, fontWeight: FontWeight.w700),
+                  style: const TextStyle(fontSize: 13, color: _Palette.subText, fontWeight: FontWeight.w800),
                 ),
               ),
             ],
@@ -1150,8 +1169,8 @@ class _HelpSection extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.62),
-        borderRadius: BorderRadius.circular(18),
+        color: _Palette.surface,
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: _Palette.line),
       ),
       child: Column(
@@ -1160,19 +1179,19 @@ class _HelpSection extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [_Palette.primaryStart, _Palette.primaryEnd]),
-                  borderRadius: BorderRadius.circular(14),
+                  color: _Palette.primarySoft,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, color: _Palette.text),
+                child: Icon(icon, color: _Palette.primary),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: _Palette.text),
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: _Palette.text),
                 ),
               ),
             ],
@@ -1198,7 +1217,7 @@ class _HelpSection extends StatelessWidget {
                   Expanded(
                     child: Text(
                       item,
-                      style: const TextStyle(fontSize: 15, color: _Palette.subText, height: 1.35),
+                      style: const TextStyle(fontSize: 14, color: _Palette.subText, height: 1.35),
                     ),
                   ),
                 ],
@@ -1234,8 +1253,8 @@ class _HelpAction extends StatelessWidget {
     return OutlinedButton(
       style: OutlinedButton.styleFrom(
         foregroundColor: danger ? _Palette.danger : _Palette.text,
-        side: BorderSide(color: danger ? _Palette.danger : _Palette.line, width: 1.4),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        side: BorderSide(color: danger ? _Palette.danger : _Palette.line),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       onPressed: onTap,
       child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -1259,38 +1278,22 @@ class _ActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: compact ? 48 : 54,
+      height: compact ? 46 : 50,
       child: FilledButton(
         style: FilledButton.styleFrom(
-          backgroundColor: filled ? null : Colors.transparent,
-          foregroundColor: filled ? _Palette.text : _Palette.subText,
-          disabledBackgroundColor: const Color(0xffe5ebf5),
-          disabledForegroundColor: const Color(0xff9ba8bd),
+          backgroundColor: filled ? _Palette.primary : _Palette.surface,
+          foregroundColor: filled ? Colors.white : _Palette.text,
+          disabledBackgroundColor: _Palette.surfaceMuted,
+          disabledForegroundColor: const Color(0xffa2aab8),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: BorderSide(color: filled ? Colors.transparent : _Palette.line, width: 1.5),
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: filled ? _Palette.primary : _Palette.line),
           ),
           elevation: 0,
-          padding: EdgeInsets.zero,
-        ).copyWith(
-          backgroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.disabled)) return const Color(0xffe5ebf5);
-            if (!filled) return Colors.transparent;
-            return null;
-          }),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
         ),
         onPressed: onTap,
-        child: Ink(
-          decoration: filled
-              ? BoxDecoration(
-                  gradient: const LinearGradient(colors: [_Palette.primaryStart, _Palette.primaryEnd]),
-                  borderRadius: BorderRadius.circular(18),
-                )
-              : null,
-          child: Center(
-            child: Text(label, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
-          ),
-        ),
+        child: Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
       ),
     );
   }
@@ -1320,13 +1323,13 @@ class _TimeSelector extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.72),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _Palette.line, width: 1.5),
+          color: _Palette.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _Palette.line),
         ),
         child: Row(
           children: [
-            const Text('발견 시각', style: TextStyle(fontSize: 17, color: _Palette.subText)),
+            const Text('발견 시각', style: TextStyle(fontSize: 15, color: _Palette.subText, fontWeight: FontWeight.w700)),
             const SizedBox(width: 12),
             Expanded(
               child: DropdownButtonFormField<int>(
@@ -1373,12 +1376,12 @@ class _TimeSelector extends StatelessWidget {
       filled: true,
       fillColor: Colors.white,
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: _Palette.line, width: 1.2),
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: _Palette.line),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xff9fb8e8), width: 1.4),
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: _Palette.primary, width: 1.4),
       ),
     );
   }
@@ -1401,19 +1404,19 @@ class _Field extends StatelessWidget {
         minLines: lines,
         maxLines: lines,
         readOnly: readOnly,
-        style: const TextStyle(fontSize: 17, color: _Palette.text),
+        style: const TextStyle(fontSize: 16, color: _Palette.text),
         decoration: InputDecoration(
           filled: true,
-          fillColor: Colors.white.withValues(alpha: 0.72),
+          fillColor: readOnly ? _Palette.surfaceMuted : _Palette.surface,
           hintText: hint,
           hintStyle: const TextStyle(color: _Palette.subText),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: _Palette.line, width: 1.5),
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: _Palette.line),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xff9fb8e8), width: 1.8),
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: _Palette.primary, width: 1.4),
           ),
         ),
       ),
@@ -1430,11 +1433,11 @@ class _PreviewFrame extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.75),
-        border: Border.all(color: _Palette.line, width: 1.5),
-        borderRadius: BorderRadius.circular(22),
+        color: _Palette.surfaceMuted,
+        border: Border.all(color: _Palette.line),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: ClipRRect(borderRadius: BorderRadius.circular(22), child: child),
+      child: ClipRRect(borderRadius: BorderRadius.circular(8), child: child),
     );
   }
 }
