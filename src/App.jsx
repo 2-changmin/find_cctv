@@ -571,23 +571,43 @@ export default function App() {
           <section className="home-screen">
             <div className="home-hero">
               <img className="home-logo" src="/app-icon.png" alt="" />
+              <div className="home-kicker">Privacy scan assistant</div>
               <h1>SafeLens</h1>
-              <p>사진 분석과 실시간 반사 확인으로 의심 후보를 빠르게 표시합니다.</p>
+              <p>의심 공간을 촬영하거나 카메라로 훑어 반사 후보를 빠르게 확인하세요.</p>
+              <div className="hero-stat-row" aria-label="현재 분석 상태">
+                <span>
+                  <strong>{boxes.length}</strong>
+                  사진 후보
+                </span>
+                <span>
+                  <strong>{liveBoxes.length}</strong>
+                  스캔 후보
+                </span>
+              </div>
             </div>
             <div className="quick-grid">
-              <button className="quick-action primary" onClick={() => setTab(TABS.analyze)}>
-                <span className="quick-icon">⌕</span>
-                <span>사진 분석</span>
-                <strong>{summary}</strong>
-              </button>
-              <button className="quick-action" onClick={() => setTab(TABS.scan)}>
+              <button className="quick-action primary" onClick={() => setTab(TABS.scan)}>
                 <span className="quick-icon">◉</span>
-                <span>실시간 스캔</span>
+                <span>
+                  <b>실시간 스캔</b>
+                  <small>후면 카메라로 렌즈 반사 확인</small>
+                </span>
                 <strong>{liveSummary}</strong>
+              </button>
+              <button className="quick-action" onClick={() => setTab(TABS.analyze)}>
+                <span className="quick-icon">⌕</span>
+                <span>
+                  <b>사진 분석</b>
+                  <small>이미지에서 의심 후보 표시</small>
+                </span>
+                <strong>{summary}</strong>
               </button>
               <button className="quick-action" onClick={() => setTab(TABS.report)}>
                 <span className="quick-icon">!</span>
-                <span>신고 보조</span>
+                <span>
+                  <b>신고 보조</b>
+                  <small>시간, 위치, 결과를 문안으로 정리</small>
+                </span>
                 <strong>문안 생성</strong>
               </button>
             </div>
