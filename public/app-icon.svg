@@ -3,34 +3,34 @@
   <desc id="desc">A geometric lens and privacy shield mark.</desc>
   <defs>
     <linearGradient id="bg" x1="152" y1="112" x2="872" y2="912" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1c2233"/>
-      <stop offset="1" stop-color="#101421"/>
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef7ff"/>
     </linearGradient>
     <linearGradient id="accent" x1="300" y1="312" x2="724" y2="728" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#b8b6ff"/>
-      <stop offset="1" stop-color="#7c7fe8"/>
+      <stop stop-color="#7fc8ff"/>
+      <stop offset="1" stop-color="#4aa7f2"/>
     </linearGradient>
     <linearGradient id="amber" x1="512" y1="150" x2="512" y2="868" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#f6c65a"/>
-      <stop offset="1" stop-color="#d99122"/>
+      <stop stop-color="#a8dcff"/>
+      <stop offset="1" stop-color="#6bbcf8"/>
     </linearGradient>
   </defs>
 
   <rect width="1024" height="1024" fill="url(#bg)"/>
 
-  <path d="M512 150 780 272v228c0 166-96 291-268 367-172-76-268-201-268-367V272l268-122Z" fill="#141a29"/>
+  <path d="M512 150 780 272v228c0 166-96 291-268 367-172-76-268-201-268-367V272l268-122Z" fill="#ffffff"/>
   <path
     d="M512 150 780 272v228c0 166-96 291-268 367-172-76-268-201-268-367V272l268-122Z"
     fill="none"
-    stroke="#e8eee9"
+    stroke="#d9e9f7"
     stroke-width="34"
     stroke-linejoin="round"
   />
-  <circle cx="512" cy="520" r="172" fill="#1b2234"/>
-  <circle cx="512" cy="520" r="142" fill="none" stroke="#e8eee9" stroke-width="40"/>
-  <circle cx="512" cy="520" r="76" fill="#2b3146"/>
-  <circle cx="512" cy="520" r="32" fill="#141a29"/>
-  <circle cx="512" cy="520" r="15" fill="#e8eee9"/>
+  <circle cx="512" cy="520" r="172" fill="#f7fbff"/>
+  <circle cx="512" cy="520" r="142" fill="none" stroke="#86c9ff" stroke-width="40"/>
+  <circle cx="512" cy="520" r="76" fill="#dff2ff"/>
+  <circle cx="512" cy="520" r="32" fill="#63b8f8"/>
+  <circle cx="512" cy="520" r="15" fill="#ffffff"/>
 
   <path
     d="M332 590a194 194 0 0 1 0-140"
@@ -47,6 +47,6 @@
     stroke-linecap="round"
   />
 
-  <rect x="500" y="386" width="24" height="268" rx="12" fill="#141a29"/>
-  <rect x="378" y="508" width="268" height="24" rx="12" fill="#141a29"/>
+  <rect x="500" y="386" width="24" height="268" rx="12" fill="#4aa7f2"/>
+  <rect x="378" y="508" width="268" height="24" rx="12" fill="#4aa7f2"/>
 </svg>
